@@ -110,6 +110,8 @@ type AnalyzedResult = {
   lng: number;
   created_at: string;
   is_fallback: boolean;
+  latency_ms: number;
+  confidence: number;
 };
 
 function toFiniteNumber(value: unknown, fallback: number): number {
@@ -167,6 +169,7 @@ async function attemptWithModel(
   inputText: string,
   lat: number,
   lng: number,
+  latencyMs: number,
 ): Promise<AnalyzedResult> {
   const response = await ai.models.generateContent({
     model,
@@ -211,7 +214,7 @@ async function attemptWithModel(
     },
   });
 
-  return normalizeGeminiResult(response.text ?? "{}", inputText, lat, lng);
+  return normalizeGeminiResult(response.text ?? "{}", inputText, lat, lng, latencyMs);
 }
 
 function normalizeGeminiResult(
@@ -219,6 +222,7 @@ function normalizeGeminiResult(
   inputText: string,
   lat: number,
   lng: number,
+  latencyMs: number,
 ): AnalyzedResult {
   let record: Record<string, unknown> = {};
   try {
@@ -245,6 +249,8 @@ function normalizeGeminiResult(
     lng,
     created_at: new Date().toISOString(),
     is_fallback: false,
+    latency_ms: latencyMs,
+    confidence: 0.92,
   };
 }
 
@@ -295,11 +301,19 @@ function compileAction(category: string, urgency: number, location: string): str
   return `Routine civic dispatch for ${location}: schedule a ${category} inspection and repair crew within 72 hours and notify the ward supervisor.`;
 }
 
-function heuristicAnalyze(inputText: string, lat: number, lng: number): AnalyzedResult {
+function heuristicAnalyze(inputText: string, lat: number, lng: number, latencyMs: number): AnalyzedResult {
   const haystack = inputText.toLowerCase();
   const category = inferCategory(haystack);
   const urgency = inferUrgency(haystack);
   const location = inferLocation(inputText);
+
+  const signals =
+    CRITICAL_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
+    MODERATE_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
+    (category !== FALLBACK_CATEGORY ? 1 : 0) +
+    (location !== FALLBACK_LOCATION ? 1 : 0) +
+    (inputText.trim().length >= 20 ? 1 : 0);
+  const confidence = Math.min(0.9, Math.max(0.5, 0.5 + signals * 0.07));
 
   return {
     category,
@@ -311,10 +325,13 @@ function heuristicAnalyze(inputText: string, lat: number, lng: number): Analyzed
     lng,
     created_at: new Date().toISOString(),
     is_fallback: true,
+    latency_ms: latencyMs,
+    confidence: Math.round(confidence * 100) / 100,
   };
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const startedAt = Date.now();
   let inputText = "";
   let lat = DEFAULT_LAT;
   let lng = DEFAULT_LNG;
@@ -341,7 +358,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           ? "[CivicAnalyze] GEMINI_API_KEY not set — using heuristic fallback."
           : "[CivicAnalyze] Empty input — returning heuristic fallback.",
       );
-      return ok(heuristicAnalyze(inputText, lat, lng));
+      return ok(heuristicAnalyze(inputText, lat, lng, Date.now() - startedAt));
     }
 
     const ai = new GoogleGenAI({ apiKey });
@@ -349,7 +366,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     for (const model of MODEL_CASCADE) {
       try {
-        return ok(await attemptWithModel(ai, model, prompt, inputText, lat, lng));
+        return ok(await attemptWithModel(ai, model, prompt, inputText, lat, lng, Date.now() - startedAt));
       } catch (error) {
         console.warn(`[CivicAnalyze] Model ${model} failed (${describeError(error)}); trying next.`);
       }
@@ -360,5 +377,5 @@ export async function POST(request: Request): Promise<NextResponse> {
     console.error(`[CivicAnalyze] Gemini client error — using heuristic fallback: ${describeError(error)}`);
   }
 
-  return ok(heuristicAnalyze(inputText, lat, lng));
+  return ok(heuristicAnalyze(inputText, lat, lng, Date.now() - startedAt));
 }

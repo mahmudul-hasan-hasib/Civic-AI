@@ -7,14 +7,21 @@ import {
   Activity,
   ArrowDownRight,
   ArrowUpRight,
+  BadgeCheck,
   BellRing,
+  Building,
   ChartColumn,
+  Check,
   CircleAlert,
   CircleCheckBig,
+  Clock,
+  Copy,
   Crosshair,
   Download,
   Droplets,
+  FileDown,
   FileText,
+  Fingerprint,
   Gauge,
   HardHat,
   Landmark,
@@ -29,10 +36,16 @@ import {
   Radio,
   Recycle,
   Scale,
+  ScrollText,
   Send,
+  Server,
   ShieldAlert,
+  ShieldCheck,
+  Siren,
   Sparkles,
+  Stamp,
   Target,
+  Timer,
   TrendingUp,
   TriangleAlert,
   Users,
@@ -45,12 +58,25 @@ import type { LucideIcon } from "lucide-react";
 
 import {
   DEFAULT_COORDS,
+  WARD_GRID,
+  budgetShiftAmount,
   clampUrgency,
+  clusterMemberCounts,
+  clusterReports,
+  demandAnalysis,
+  departmentFor,
   formatCoordinate,
+  formatCurrency,
   formatRelativeTime,
+  generateTrackingId,
+  normalizeCategory,
+  referenceHash,
+  slaHours,
   urgencyBadgeClass,
   urgencyBarClass,
   urgencyLabel,
+  wardFor,
+  wardLabel,
 } from "./civic-shared";
 import type { CivicReport } from "./civic-shared";
 
@@ -111,40 +137,20 @@ const PLACEHOLDER: Record<string, string> = {
   "en-IN": "e.g. Our lane has had no water supply for three days and the storm drain has collapsed.",
 };
 
-const BUDGET_ALLOCATION: Record<string, number> = {
-  Drainage: 12,
-  "Roads & Transport": 26,
-  "Water Supply": 22,
-  Sanitation: 16,
-  Electricity: 14,
-  "Waste Management": 10,
-};
-
-const DEMAND_TREND: Record<string, number> = {
-  Drainage: 65,
-  "Roads & Transport": 22,
-  "Water Supply": -8,
-  Sanitation: 14,
-  Electricity: 6,
-  "Waste Management": 31,
-};
-
 const CATEGORY_ICON: Record<string, LucideIcon> = {
   Drainage: Droplets,
   "Roads & Transport": Wrench,
   "Water Supply": Droplets,
-  Sanitation: Recycle,
   Electricity: Zap,
-  "Waste Management": Recycle,
+  "Sanitation / Civic Maintenance": Recycle,
 };
 
 const CATEGORY_TINT: Record<string, string> = {
   Drainage: "text-sky-300 bg-sky-500/10 ring-sky-500/25",
   "Roads & Transport": "text-amber-300 bg-amber-500/10 ring-amber-500/25",
   "Water Supply": "text-cyan-300 bg-cyan-500/10 ring-cyan-500/25",
-  Sanitation: "text-violet-300 bg-violet-500/10 ring-violet-500/25",
   Electricity: "text-yellow-300 bg-yellow-500/10 ring-yellow-500/25",
-  "Waste Management": "text-lime-300 bg-lime-500/10 ring-lime-500/25",
+  "Sanitation / Civic Maintenance": "text-violet-300 bg-violet-500/10 ring-violet-500/25",
 };
 
 const PANEL =
@@ -208,6 +214,7 @@ function buildSeedReports(): CivicReport[] {
 
   const seeds: {
     id: string;
+    tracking_id: string;
     category: string;
     urgency_score: number;
     summary_en: string;
@@ -220,6 +227,7 @@ function buildSeedReports(): CivicReport[] {
   }[] = [
     {
       id: "CIV-260901-4417",
+      tracking_id: "CIVIC-2026-4Q2X8M5K",
       category: "Drainage",
       urgency_score: 5,
       summary_en:
@@ -235,6 +243,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-8820",
+      tracking_id: "CIVIC-2026-7P9L3W6D",
       category: "Water Supply",
       urgency_score: 4,
       summary_en:
@@ -250,6 +259,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-1053",
+      tracking_id: "CIVIC-2026-2R8J4V7F",
       category: "Electricity",
       urgency_score: 4,
       summary_en:
@@ -264,6 +274,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-6290",
+      tracking_id: "CIVIC-2026-5T3N9H6C",
       category: "Drainage",
       urgency_score: 4,
       summary_en:
@@ -279,6 +290,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-7742",
+      tracking_id: "CIVIC-2026-8K2M4Z9X",
       category: "Roads & Transport",
       urgency_score: 3,
       summary_en:
@@ -293,21 +305,23 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-3388",
+      tracking_id: "CIVIC-2026-3V7L5B8P",
       category: "Drainage",
       urgency_score: 3,
       summary_en:
-        "Standing water with a strong sewage smell persists after rain and mosquitoes are breeding on the lane.",
-      extracted_location: "Shyamoli",
+        "A flooded service lane behind the keraniganj market has standing sewage water that residents wade through daily.",
+      extracted_location: "Keraniganj service lane",
       actionable_recommendation:
-        "Send a jet-suction tanker and spray larvicide across the affected lanes within 24 hours.",
-      lat: 23.769,
-      lng: 90.369,
+        "Send a jet-suction tanker and spray larvicide across the affected lane within 24 hours.",
+      lat: 23.7745,
+      lng: 90.3762,
       ageHours: 16,
       input_text: "বৃষ্টির পরও আশপাশে পানি দাঁড়িয়ে আছে, দুর্গন্ধ এবং মশা বাড়ছে।",
     },
     {
       id: "CIV-260901-5514",
-      category: "Sanitation",
+      tracking_id: "CIVIC-2026-6X4N2G9R",
+      category: "Drainage",
       urgency_score: 3,
       summary_en:
         "Household waste has not been cleared for eleven days and is blocking the nullah, drawing flies.",
@@ -321,6 +335,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-2267",
+      tracking_id: "CIVIC-2026-9D7H3W5T",
       category: "Waste Management",
       urgency_score: 2,
       summary_en:
@@ -335,6 +350,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260901-9931",
+      tracking_id: "CIVIC-2026-2Z6J8M4K",
       category: "Roads & Transport",
       urgency_score: 2,
       summary_en:
@@ -349,6 +365,7 @@ function buildSeedReports(): CivicReport[] {
     },
     {
       id: "CIV-260900-4125",
+      tracking_id: "CIVIC-2026-5C9R2V7L",
       category: "Water Supply",
       urgency_score: 2,
       summary_en:
@@ -363,19 +380,32 @@ function buildSeedReports(): CivicReport[] {
     },
   ];
 
-  return seeds.map((seed) => ({
-    id: seed.id,
-    category: seed.category,
-    urgency_score: seed.urgency_score,
-    summary_en: seed.summary_en,
-    extracted_location: seed.extracted_location,
-    actionable_recommendation: seed.actionable_recommendation,
-    lat: seed.lat,
-    lng: seed.lng,
-    created_at: at(seed.ageHours),
-    input_text: seed.input_text,
-    source: "seed" as const,
-  }));
+  return seeds.map((seed) => {
+    const category = normalizeCategory(seed.category);
+    const created_at = at(seed.ageHours);
+    const trackingId = seed.tracking_id;
+    return {
+      id: seed.id,
+      category,
+      urgency_score: seed.urgency_score,
+      summary_en: seed.summary_en,
+      extracted_location: seed.extracted_location,
+      actionable_recommendation: seed.actionable_recommendation,
+      lat: seed.lat,
+      lng: seed.lng,
+      created_at,
+      input_text: seed.input_text,
+      source: "seed" as const,
+      ward: wardFor(seed.lat, seed.lng),
+      department: departmentFor(category),
+      sla_hours: slaHours(seed.urgency_score),
+      tracking_id: trackingId,
+      reference_hash: referenceHash(trackingId, seed.id),
+      is_fallback: false,
+      latency_ms: null,
+      confidence: 0.95,
+    };
+  });
 }
 
 function Panel({
@@ -534,6 +564,12 @@ export default function CivicDashboardPage() {
   const [unread, setUnread] = useState(0);
   const [reports, setReports] = useState<CivicReport[]>(buildSeedReports);
   const [severity, setSeverity] = useState<SeverityFilter>("all");
+  const [wardScope, setWardScope] = useState<string | null>(null);
+  const [telemetry, setTelemetry] = useState<{
+    mode: "primary" | "resilient";
+    latency_ms: number;
+    confidence: number;
+  } | null>(null);
 
   const [draft, setDraft] = useState("");
   const [language, setLanguage] = useState(SUPPORTED_LANGUAGES[0].code);
@@ -687,30 +723,7 @@ export default function CivicDashboardPage() {
     const highUrgency = reports.filter((report) => report.urgency_score >= 4).length;
     const critical = reports.filter((report) => report.urgency_score >= 5).length;
 
-    const categories = Array.from(
-      new Set<string>([...Object.keys(BUDGET_ALLOCATION), ...counts.keys()]),
-    );
-
-    const allocationRows = categories
-      .map((category) => {
-        const demandPct = ranked.find((row) => row.category === category)?.demandPct ?? 0;
-        const budgetPct = BUDGET_ALLOCATION[category] ?? 4;
-        return {
-          category,
-          count: counts.get(category) ?? 0,
-          demandPct,
-          budgetPct,
-          gapPct: demandPct - budgetPct,
-          trend: DEMAND_TREND[category] ?? 0,
-        };
-      })
-      .sort((a, b) => b.gapPct - a.gapPct);
-
-    const alignment = allocationRows.reduce(
-      (acc, row) => acc + Math.min(row.demandPct, row.budgetPct) / 100,
-      0,
-    );
-    const gapIndex = Math.round(Math.max(0, 100 - alignment * 100));
+    const demand = demandAnalysis(reports, null);
 
     return {
       total,
@@ -718,10 +731,8 @@ export default function CivicDashboardPage() {
       critical,
       highUrgencyPct: total > 0 ? (highUrgency / total) * 100 : 0,
       ranked,
-      allocationRows,
-      gapIndex,
+      gapIndex: demand.gapIndex,
       topCategory: ranked[0] ?? { category: "No data", count: 0, demandPct: 0 },
-      priority: allocationRows[0] ?? null,
     };
   }, [reports]);
 
@@ -734,6 +745,15 @@ export default function CivicDashboardPage() {
     }
     return reports;
   }, [reports, severity]);
+
+  const clusters = useMemo(() => clusterReports(visibleReports), [visibleReports]);
+
+  const clusterCountFor = useMemo(() => clusterMemberCounts(clusters), [clusters]);
+
+  const wardDemand = useMemo(
+    () => demandAnalysis(reports, wardScope),
+    [reports, wardScope],
+  );
 
   const liveCount = useMemo(
     () => reports.filter((report) => report.source === "live").length,
@@ -790,22 +810,43 @@ export default function CivicDashboardPage() {
 
       const analysed = (payload?.data ?? payload) as Partial<CivicReport>;
       const now = new Date();
+      const reportLat = toFiniteNumber(analysed.lat, coords.lat);
+      const reportLng = toFiniteNumber(analysed.lng, coords.lng);
+      const isFallback = Boolean(analysed.is_fallback);
+      const latencyMs = typeof analysed.latency_ms === "number" ? analysed.latency_ms : null;
+      const confidence = toFiniteNumber(analysed.confidence, 0.9);
+      const category = normalizeCategory(analysed.category?.trim() || text);
+      const trackingId = generateTrackingId();
+      const created_at = analysed.created_at ?? now.toISOString();
       const report: CivicReport = {
         id: buildTicketId(now),
-        category: analysed.category?.trim() || "Unclassified",
+        category,
         urgency_score: clampUrgency(analysed.urgency_score),
         summary_en: analysed.summary_en?.trim() || text,
         extracted_location: analysed.extracted_location?.trim() || "Location not specified",
         actionable_recommendation:
           analysed.actionable_recommendation?.trim() ||
           "Route to the ward engineer for a physical inspection within 48 hours.",
-        lat: toFiniteNumber(analysed.lat, coords.lat),
-        lng: toFiniteNumber(analysed.lng, coords.lng),
-        created_at: analysed.created_at ?? now.toISOString(),
+        lat: reportLat,
+        lng: reportLng,
+        created_at,
         input_text: text,
         source: "live",
+        ward: wardFor(reportLat, reportLng),
+        department: departmentFor(category),
+        sla_hours: slaHours(clampUrgency(analysed.urgency_score)),
+        tracking_id: trackingId,
+        reference_hash: referenceHash(trackingId, created_at),
+        is_fallback: isFallback,
+        latency_ms: latencyMs,
+        confidence,
       };
 
+      setTelemetry({
+        mode: isFallback ? "resilient" : "primary",
+        latency_ms: latencyMs ?? 0,
+        confidence,
+      });
       setVerdict(report);
       setReports((previous) => [report, ...previous]);
       setDraft("");
@@ -1120,7 +1161,7 @@ export default function CivicDashboardPage() {
 
               {isSubmitting ? <TriageSkeleton /> : null}
 
-              {verdict && !isSubmitting ? <VerdictCard report={verdict} /> : null}
+              {verdict && !isSubmitting ? <ReceiptCard report={verdict} /> : null}
             </div>
 
             <aside className="flex flex-col gap-5 lg:col-span-2">
@@ -1208,6 +1249,69 @@ export default function CivicDashboardPage() {
             aria-labelledby="tab-policymaker"
             className="mt-6 flex flex-col gap-5"
           >
+            <Panel
+              title="AI Engine Status"
+              subtitle="Live triage service telemetry"
+              icon={Server}
+            >
+              <div className="flex flex-col gap-4 p-5">
+                {telemetry ? (
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ${
+                        telemetry.mode === "primary"
+                          ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"
+                          : "bg-amber-500/15 text-amber-300 ring-amber-500/30"
+                      }`}
+                    >
+                      {telemetry.mode === "primary" ? (
+                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                      ) : (
+                        <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      {telemetry.mode === "primary"
+                        ? "Primary — Gemini cascade online"
+                        : "Resilient Fail-Safe engaged"}
+                    </span>
+                    <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                      <Timer className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+                      Latency{" "}
+                      <span className="font-semibold tabular-nums text-slate-200">
+                        {telemetry.latency_ms} ms
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                      <Gauge className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+                      Confidence{" "}
+                      <span className="font-semibold tabular-nums text-slate-200">
+                        {Math.round(telemetry.confidence * 100)}%
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                      <Stamp className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+                      Last ticket{" "}
+                      <span className="font-semibold tabular-nums text-slate-200">
+                        {reports[0]?.tracking_id ?? "—"}
+                      </span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 ring-1 ring-slate-700">
+                      <CircleCheckBig className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+                      Standby — awaiting first live analysis
+                    </span>
+                  </div>
+                )}
+                <p className="text-xs leading-relaxed text-slate-500">
+                  Primary mode routes analysis through the Gemini model cascade. If every model in
+                  the cascade is unavailable, the engine automatically engages the on-device
+                  heuristic redressal resolver (Resilient Fail-Safe) so no grievance ever fails
+                  to reach the ward desk.
+                </p>
+              </div>
+            </Panel>
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard
                 label="Total reports"
@@ -1250,8 +1354,8 @@ export default function CivicDashboardPage() {
 
             <div className="grid gap-5 xl:grid-cols-3">
               <Panel
-                title="Ward grievance heatmap"
-                subtitle={`${visibleReports.length} of ${analytics.total} tickets plotted`}
+                title="Ward grievance cluster map"
+                subtitle={`${clusters.length} incident clusters plotted from ${visibleReports.length} of ${analytics.total} tickets`}
                 icon={MapPin}
                 className="xl:col-span-2"
                 action={
@@ -1287,55 +1391,106 @@ export default function CivicDashboardPage() {
                 }
               >
                 <div className="p-2">
-                  <CivicMap reports={visibleReports} />
+                  <CivicMap reports={visibleReports} clusters={clusters} />
                 </div>
               </Panel>
 
               <Panel
-                title="Resource allocation gap"
-                subtitle="Citizen demand vs. simulated municipal capex"
+                title="Municipal budget vs. citizen demand"
+                subtitle="Ward-level demand-gap analysis · simulated capex"
                 icon={Wallet}
+                action={
+                  <label className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+                    <Building className="h-3.5 w-3.5" aria-hidden="true" />
+                    <select
+                      value={wardScope ?? ""}
+                      onChange={(event) =>
+                        setWardScope(event.target.value === "" ? null : event.target.value)
+                      }
+                      className="max-w-[190px] rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 outline-none transition focus:border-indigo-400"
+                      aria-label="Scope analysis by ward"
+                    >
+                      <option value="">All wards (city-wide)</option>
+                      {WARD_GRID.map((ward) => (
+                        <option key={ward.ward} value={ward.ward}>
+                          {wardLabel(ward.ward)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                }
               >
                 <div className="flex flex-col gap-5 p-5">
-                  {analytics.priority && analytics.priority.gapPct > 0 ? (
-                    <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
-                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-orange-300">
-                        <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />
-                        Priority intervention
+                  {wardDemand.mismatches.length > 0 ? (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-red-300">
+                        <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                        Reallocation required
                       </p>
-                      <p className="mt-2 text-sm leading-relaxed text-orange-100">
-                        <span className="font-semibold">{analytics.priority.category}</span>{" "}
-                        complaints are{" "}
+                      <p className="mt-2 text-sm leading-relaxed text-red-50">
                         <span className="font-semibold">
-                          {analytics.priority.trend >= 0 ? "up" : "down"}{" "}
-                          {Math.abs(analytics.priority.trend)}%
+                          {wardDemand.mismatches[0].category}
                         </span>{" "}
-                        period-on-period, but only{" "}
-                        <span className="font-semibold">{analytics.priority.budgetPct}%</span> of
-                        the municipal capex budget is allocated to it — a{" "}
+                        absorbs{" "}
                         <span className="font-semibold">
-                          {analytics.priority.gapPct.toFixed(1)} pp shortfall
+                          {wardDemand.mismatches[0].demandPct.toFixed(1)}%
                         </span>{" "}
-                        against {analytics.priority.demandPct.toFixed(1)}% of citizen demand.
+                        of citizen demand but only{" "}
+                        <span className="font-semibold">
+                          {wardDemand.mismatches[0].budgetPct}%
+                        </span>{" "}
+                        of ward capex — a{" "}
+                        <span className="font-semibold">
+                          {wardDemand.mismatches[0].deficitPct.toFixed(1)} pp shortfall
+                        </span>
+                        . Reallocate{" "}
+                        <span className="font-semibold tabular-nums">
+                          {formatCurrency(budgetShiftAmount(wardDemand.mismatches[0].deficitPct))}
+                        </span>{" "}
+                        of municipal capex to{" "}
+                        {wardDemand.mismatches[0].category.toLowerCase()} this cycle.
                       </p>
-                      <p className="mt-3 text-xs leading-relaxed text-orange-200/90">
-                        Recommendation: reallocate{" "}
-                        {Math.max(1, Math.round(analytics.priority.gapPct))} percentage points of
-                        capex from the least-demanded service to{" "}
-                        {analytics.priority.category.toLowerCase()}, with a 30-day
-                        delivery milestone tracked against the priority queue.
-                      </p>
+                      {wardDemand.mismatches.length > 1 ? (
+                        <ul className="mt-3 flex flex-wrap gap-2">
+                          {wardDemand.mismatches.slice(1).map((row) => (
+                            <li
+                              key={row.category}
+                              className="rounded-full bg-red-500/15 px-2.5 py-1 text-[10px] font-semibold text-red-200 ring-1 ring-red-500/30"
+                            >
+                              {row.category} +{row.deficitPct.toFixed(1)} pp
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                      Budget allocation is currently tracking citizen demand. No reallocation
-                      is required this cycle.
+                      Budget allocation is currently tracking citizen demand. No reallocation is
+                      required this cycle.
                     </div>
                   )}
 
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] text-slate-500">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-2 w-4 rounded-full bg-indigo-400" aria-hidden="true" />
+                      Citizen demand
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-2 w-4 rounded-full bg-slate-500" aria-hidden="true" />
+                      Budget share
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      Gap index{" "}
+                      <span className="font-semibold tabular-nums text-slate-300">
+                        {wardDemand.gapIndex}
+                      </span>
+                      /100 · {wardDemand.total} ticket{wardDemand.total === 1 ? "" : "s"} in scope
+                    </span>
+                  </div>
+
                   <ul className="flex flex-col gap-4">
-                    {analytics.allocationRows.map((row) => {
-                      const underfunded = row.gapPct > 0;
+                    {wardDemand.allocations.map((row) => {
+                      const underfunded = row.deficitPct > 0;
                       return (
                         <li key={row.category} className="flex flex-col gap-2">
                           <div className="flex items-center justify-between gap-2">
@@ -1350,13 +1505,13 @@ export default function CivicDashboardPage() {
                                   : "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30"
                               }`}
                             >
-                              {row.gapPct >= 0 ? (
+                              {row.deficitPct >= 0 ? (
                                 <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
                               ) : (
                                 <ArrowDownRight className="h-3 w-3" aria-hidden="true" />
                               )}
-                              {row.gapPct >= 0 ? "+" : ""}
-                              {row.gapPct.toFixed(1)} pp
+                              {row.deficitPct >= 0 ? "+" : ""}
+                              {row.deficitPct.toFixed(1)} pp
                             </span>
                           </div>
 
@@ -1385,11 +1540,8 @@ export default function CivicDashboardPage() {
                           </div>
 
                           <p className="text-[11px] text-slate-500">
-                            {row.count} ticket{row.count === 1 ? "" : "s"} ·{" "}
-                            {row.trend >= 0
-                              ? `demand up ${row.trend}%`
-                              : `demand down ${Math.abs(row.trend)}%`}{" "}
-                            period-on-period
+                            {row.complaints} ticket{row.complaints === 1 ? "" : "s"} routed in{" "}
+                            {wardScope ? wardLabel(wardScope) : "this scope"}
                           </p>
                         </li>
                       );
@@ -1417,50 +1569,59 @@ export default function CivicDashboardPage() {
                 }
               >
                 <ul className="flex max-h-[520px] flex-col divide-y divide-slate-800 overflow-y-auto">
-                  {visibleReports.map((report) => (
-                    <li key={report.id}>
-                      <div className="flex w-full flex-col gap-3 px-5 py-4 text-left">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="tabular-nums text-[11px] font-semibold text-slate-400">
-                              {report.id}
-                            </span>
-                            <CategoryBadge category={report.category} />
-                            <UrgencyBadge score={report.urgency_score} />
-                            {report.source === "live" ? (
-                              <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 ring-1 ring-indigo-500/30">
-                                New
+                  {visibleReports.map((report) => {
+                    const memberCount = clusterCountFor.get(report.id) ?? 1;
+                    return (
+                      <li key={report.id}>
+                        <div className="flex w-full flex-col gap-3 px-5 py-4 text-left">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="tabular-nums text-[11px] font-semibold text-slate-400">
+                                {report.tracking_id}
                               </span>
-                            ) : null}
+                              <CategoryBadge category={report.category} />
+                              <UrgencyBadge score={report.urgency_score} />
+                              {report.source === "live" ? (
+                                <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 ring-1 ring-indigo-500/30">
+                                  New
+                                </span>
+                              ) : null}
+                              {memberCount > 1 ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/30">
+                                  <Siren className="h-3 w-3" aria-hidden="true" />
+                                  Consolidated Cluster · {memberCount} Citizens Impacted
+                                </span>
+                              ) : null}
+                            </div>
+                            <RelativeTime value={report.created_at} />
                           </div>
-                          <RelativeTime value={report.created_at} />
-                        </div>
 
-                        <p className="text-sm leading-relaxed text-slate-200">
-                          {report.summary_en}
-                        </p>
+                          <p className="text-sm leading-relaxed text-slate-200">
+                            {report.summary_en}
+                          </p>
 
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-                            <MapPin className="h-3 w-3" aria-hidden="true" />
-                            {report.extracted_location}
-                            <span className="tabular-nums">
-                              · {formatCoordinate(report.lat)}, {formatCoordinate(report.lng)}
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                              <MapPin className="h-3 w-3" aria-hidden="true" />
+                              {report.extracted_location} · {wardLabel(report.ward)}
+                              <span className="tabular-nums">
+                                · {formatCoordinate(report.lat)}, {formatCoordinate(report.lng)}
+                              </span>
                             </span>
-                          </span>
-                          <UrgencyMeter score={report.urgency_score} />
-                        </div>
+                            <UrgencyMeter score={report.urgency_score} />
+                          </div>
 
-                        <p className="flex items-start gap-2 rounded-lg bg-slate-950/60 px-3 py-2 text-[11px] leading-relaxed text-slate-400">
-                          <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-indigo-300" aria-hidden="true" />
-                          <span>
-                            <span className="font-semibold text-slate-300">Action: </span>
-                            {report.actionable_recommendation}
-                          </span>
-                        </p>
-                      </div>
-                    </li>
-                  ))}
+                          <p className="flex items-start gap-2 rounded-lg bg-slate-950/60 px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+                            <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-indigo-300" aria-hidden="true" />
+                            <span>
+                              <span className="font-semibold text-slate-300">Action: </span>
+                              {report.actionable_recommendation}
+                            </span>
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
 
                   {visibleReports.length === 0 ? (
                     <li className="px-5 py-12 text-center text-sm text-slate-500">
@@ -1558,7 +1719,33 @@ function TriageSkeleton() {
   );
 }
 
-function VerdictCard({ report }: { report: CivicReport }) {
+function ReceiptCard({ report }: { report: CivicReport }) {
+  const [copied, setCopied] = useState(false);
+  const deadlineMs = new Date(report.created_at).getTime() + report.sla_hours * 3_600_000;
+
+  const copyReference = () => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    navigator.clipboard
+      .writeText(`CivicLens Receipt ${report.tracking_id} · REF-${report.reference_hash}`)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => setCopied(false));
+  };
+
+  const downloadReceipt = () => {
+    const blob = new Blob([buildReceiptHtml(report)], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `civic-receipt-${report.tracking_id}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section
       aria-live="polite"
@@ -1567,15 +1754,90 @@ function VerdictCard({ report }: { report: CivicReport }) {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-indigo-300">
-            <CircleCheckBig className="h-3.5 w-3.5" aria-hidden="true" />
-            Ticket {report.id} registered
+            <ScrollText className="h-3.5 w-3.5" aria-hidden="true" />
+            Official Filing Receipt
           </p>
-          <p className="mt-1.5 text-xs text-slate-400">
-            Filed to the ward queue and plotted on the policy heatmap.
+          <p className="mt-1 text-sm font-semibold tabular-nums text-slate-100">
+            {report.tracking_id}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Filed to the {wardLabel(report.ward)} queue and routed to the ward desk.
           </p>
         </div>
-        <RelativeTime value={report.created_at} />
+        <div className="flex flex-col items-end gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
+            <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            Dispatched · Under Investigation
+          </span>
+          <RelativeTime value={report.created_at} />
+        </div>
       </header>
+
+      {report.is_fallback ? (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          Analysed by the Resilient Fail-Safe redressal engine — the Gemini model cascade was
+          unavailable at submission time.
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <Building className="h-3 w-3" aria-hidden="true" />
+            Dispatched department
+          </p>
+          <p className="text-xs font-medium leading-relaxed text-slate-200">{report.department}</p>
+        </div>
+        <div className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            SLA countdown · response window {report.sla_hours} hours
+          </p>
+          <p className="text-sm font-semibold text-slate-100">
+            <SlaCountdown deadline={deadlineMs} />
+          </p>
+          <p className="text-[11px] tabular-nums text-slate-500">
+            Resolve by{" "}
+            {new Date(deadlineMs).toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs font-semibold tabular-nums text-slate-200">
+          <Fingerprint className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+          REF-{report.reference_hash}
+        </span>
+        <button
+          type="button"
+          onClick={copyReference}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-semibold text-slate-200 transition hover:border-indigo-400/60 hover:text-white"
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+              Copy tracking ID &amp; hash
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={downloadReceipt}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-400/40 bg-indigo-500/15 px-3 py-2 text-[11px] font-semibold text-indigo-200 transition hover:bg-indigo-500/25"
+        >
+          <FileDown className="h-3.5 w-3.5" aria-hidden="true" />
+          Download receipt
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <CategoryBadge category={report.category} />
@@ -1621,9 +1883,100 @@ function VerdictCard({ report }: { report: CivicReport }) {
         </p>
         <p className="text-xs leading-relaxed text-slate-400">{report.input_text}</p>
         <p className="text-[11px] tabular-nums text-slate-600">
-          Geotagged at {formatCoordinate(report.lat)}, {formatCoordinate(report.lng)}
+          Geotagged at {formatCoordinate(report.lat)}, {formatCoordinate(report.lng)} ·{" "}
+          {wardLabel(report.ward)}
         </p>
       </div>
     </section>
   );
+}
+
+function SlaCountdown({ deadline }: { deadline: number }) {
+  const [remaining, setRemaining] = useState<number>(() => Math.max(0, deadline - Date.now()));
+
+  useEffect(() => {
+    const update = () => setRemaining(Math.max(0, deadline - Date.now()));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+
+  const totalSeconds = Math.floor(remaining / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const expired = remaining <= 0;
+
+  if (expired) {
+    return <span className="text-red-300">SLA EXPIRED</span>;
+  }
+  return (
+    <span className="tabular-nums text-slate-100">
+      {hours}h {minutes}m {seconds}s
+    </span>
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildReceiptHtml(report: CivicReport): string {
+  const issuedAt = new Date(report.created_at);
+  const deadline = new Date(issuedAt.getTime() + report.sla_hours * 3_600_000);
+  const remainingMs = Math.max(0, deadline.getTime() - Date.now());
+  const hours = Math.floor(remainingMs / 3_600_000);
+  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:12px;color:#64748b;width:40%">${label}</td><td style="padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:13px;color:#0f172a;font-weight:600">${value}</td></tr>`;
+
+  const rows = [
+    row("Tracking ID", escapeHtml(report.tracking_id)),
+    row("Reference Hash", `REF-${escapeHtml(report.reference_hash)}`),
+    row("Status", "Dispatched · Under Investigation"),
+    row("Category", escapeHtml(report.category)),
+    row("Urgency", `${report.urgency_score} / 5 · ${urgencyLabel(report.urgency_score)}`),
+    row("Ward", escapeHtml(wardLabel(report.ward))),
+    row("Location", escapeHtml(report.extracted_location)),
+    row("Department", escapeHtml(report.department)),
+    row("SLA response window", `${report.sla_hours} hours`),
+    row("SLA remaining (snapshot)", `${hours}h ${minutes}m`),
+    row("Issued", issuedAt.toLocaleString("en-IN")),
+    row("Geotag", `${formatCoordinate(report.lat)}, ${formatCoordinate(report.lng)}`),
+  ].join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CivicLens Filing Receipt ${escapeHtml(report.tracking_id)}</title>
+  </head>
+  <body style="margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;color:#0f172a">
+    <div style="max-width:640px;margin:32px auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+      <div style="background:linear-gradient(90deg,#4f46e5,#0ea5e9);padding:20px 24px;color:#ffffff">
+        <div style="font-size:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Official Filing Receipt</div>
+        <div style="font-size:11px;opacity:0.85;margin-top:4px">CivicLens AI Civic Intelligence Platform</div>
+      </div>
+      <div style="padding:24px">
+        <table style="width:100%;border-collapse:collapse">${rows}</table>
+        <div style="margin-top:20px;padding:12px 16px;background:#f1f5f9;border-radius:8px;font-size:12px;color:#334155;line-height:1.6">
+          <strong>Summary:</strong> ${escapeHtml(report.summary_en)}
+        </div>
+        <div style="margin-top:12px;padding:12px 16px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;font-size:12px;color:#065f46;line-height:1.6">
+          <strong>Recommended civic action:</strong> ${escapeHtml(report.actionable_recommendation)}
+        </div>
+        <p style="margin-top:20px;font-size:11px;color:#94a3b8;line-height:1.6">
+          This receipt is auto-generated by the CivicLens grievance triage service. Keep the
+          tracking ID and reference hash for follow-up correspondence. Budget figures shown in the
+          policymaker workspace are simulated for demonstration.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>`;
 }
