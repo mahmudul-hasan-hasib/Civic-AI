@@ -99,6 +99,14 @@ export function normalizeCategory(value: string): string {
     return "Roads & Transport";
   }
   if (
+    haystack.includes("hazard") ||
+    haystack.includes("grid") ||
+    haystack.includes("discom") ||
+    haystack.includes("gas")
+  ) {
+    return "Electricity";
+  }
+  if (
     haystack.includes("water") ||
     haystack.includes("pipe") ||
     haystack.includes("leak") ||
@@ -341,17 +349,18 @@ export function departmentFor(category: string): string {
   return DEPARTMENT_BY_CATEGORY[normalizeCategory(category)] ?? DEPARTMENT_BY_CATEGORY["Sanitation / Civic Maintenance"];
 }
 
-const SLA_HOURS_BY_URGENCY: Record<number, number> = { 1: 72, 2: 72, 3: 72, 4: 48, 5: 24 };
+const SLA_HOURS_BY_URGENCY: Record<number, number> = { 1: 120, 2: 120, 3: 48, 4: 24, 5: 2 };
 
 export function slaHours(score: number): number {
-  return SLA_HOURS_BY_URGENCY[clampUrgency(score)] ?? 72;
+  return SLA_HOURS_BY_URGENCY[clampUrgency(score)] ?? 120;
 }
 
 export function slapolicyLabel(score: number): string {
   const leveled = clampUrgency(score);
-  if (leveled >= 5) return "SLA: 24 Hours for Level 5 Urgency";
-  if (leveled === 4) return "SLA: 48 Hours for Level 4 Urgency";
-  return "SLA: 72 Hours for Level 2-3 Urgency";
+  if (leveled >= 5) return "Immediate Emergency Response (SLA: 2 Hours)";
+  if (leveled === 4) return "Priority Response (SLA: 12 - 24 Hours)";
+  if (leveled === 3) return "Standard Operational Response (SLA: 48 Hours)";
+  return "Routine Maintenance (SLA: 72 - 120 Hours)";
 }
 
 const TRACKING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

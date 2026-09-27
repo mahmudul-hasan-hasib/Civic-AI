@@ -1,7 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Activity,
@@ -72,6 +80,7 @@ import {
   normalizeCategory,
   referenceHash,
   slaHours,
+  slapolicyLabel,
   urgencyBadgeClass,
   urgencyBarClass,
   urgencyLabel,
@@ -161,6 +170,10 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
   timeout: 8000,
   maximumAge: 30_000,
 };
+
+const EMPTY_SUBSCRIBE = () => () => {};
+const CLIENT_MOUNTED = () => true;
+const SERVER_HYDRATING = () => false;
 
 function categoryIcon(category: string): LucideIcon {
   const direct = CATEGORY_ICON[category];
@@ -582,6 +595,7 @@ export default function CivicDashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<CivicReport | null>(null);
+  const mounted = useSyncExternalStore(EMPTY_SUBSCRIBE, CLIENT_MOUNTED, SERVER_HYDRATING);
 
   const draftRef = useRef(draft);
   const transcriptBaseRef = useRef("");
@@ -808,7 +822,9 @@ export default function CivicDashboardPage() {
         throw new Error(payload?.error ?? "The grievance could not be analysed.");
       }
 
-      const analysed = (payload?.data ?? payload) as Partial<CivicReport>;
+      const analysed = (payload?.data ?? payload) as Partial<CivicReport> & {
+        assigned_department?: unknown;
+      };
       const now = new Date();
       const reportLat = toFiniteNumber(analysed.lat, coords.lat);
       const reportLng = toFiniteNumber(analysed.lng, coords.lng);
@@ -816,6 +832,10 @@ export default function CivicDashboardPage() {
       const latencyMs = typeof analysed.latency_ms === "number" ? analysed.latency_ms : null;
       const confidence = toFiniteNumber(analysed.confidence, 0.9);
       const category = normalizeCategory(analysed.category?.trim() || text);
+      const aiDepartment =
+        typeof analysed.assigned_department === "string"
+          ? analysed.assigned_department.trim()
+          : "";
       const trackingId = generateTrackingId();
       const created_at = analysed.created_at ?? now.toISOString();
       const report: CivicReport = {
@@ -833,7 +853,7 @@ export default function CivicDashboardPage() {
         input_text: text,
         source: "live",
         ward: wardFor(reportLat, reportLng),
-        department: departmentFor(category),
+        department: aiDepartment || departmentFor(category),
         sla_hours: slaHours(clampUrgency(analysed.urgency_score)),
         tracking_id: trackingId,
         reference_hash: referenceHash(trackingId, created_at),
@@ -910,6 +930,23 @@ export default function CivicDashboardPage() {
       : locationState === "locating"
         ? "Detecting your location…"
         : "Using city default (Dhaka)";
+
+  if (!mounted) {
+    return (
+      <div
+        className="min-h-screen w-full bg-slate-950 flex flex-col items-center justify-center text-slate-400"
+        suppressHydrationWarning
+      >
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent mb-4"
+          suppressHydrationWarning
+        />
+        <p className="text-sm font-medium" suppressHydrationWarning>
+          Loading Civic Intelligence Dashboard...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-200">
@@ -1792,18 +1829,27 @@ function ReceiptCard({ report }: { report: CivicReport }) {
         <div className="flex flex-col gap-1.5 rounded-xl border border-slate-800 bg-slate-950/50 p-3.5">
           <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             <Clock className="h-3 w-3" aria-hidden="true" />
-            SLA countdown · response window {report.sla_hours} hours
+            {slapolicyLabel(report.urgency_score)}
           </p>
           <p className="text-sm font-semibold text-slate-100">
             <SlaCountdown deadline={deadlineMs} />
           </p>
-          <p className="text-[11px] tabular-nums text-slate-500">
-            Resolve by{" "}
-            {new Date(deadlineMs).toLocaleString("en-IN", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}
-          </p>
+          {report.urgency_score >= 5 ? (
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-red-300">
+              Emergency Dispatch within 2 Hours
+              <span className="mt-0.5 block font-normal normal-case text-slate-500">
+                Target resolution window: 2 - 4 hours
+              </span>
+            </p>
+          ) : (
+            <p className="text-[11px] tabular-nums text-slate-500">
+              Resolve by{" "}
+              {new Date(deadlineMs).toLocaleString("en-IN", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1892,7 +1938,7 @@ function ReceiptCard({ report }: { report: CivicReport }) {
 }
 
 function SlaCountdown({ deadline }: { deadline: number }) {
-  const [remaining, setRemaining] = useState<number>(() => Math.max(0, deadline - Date.now()));
+  const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     const update = () => setRemaining(Math.max(0, deadline - Date.now()));
@@ -1900,6 +1946,14 @@ function SlaCountdown({ deadline }: { deadline: number }) {
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [deadline]);
+
+  if (remaining === null) {
+    return (
+      <span className="tabular-nums text-slate-100" suppressHydrationWarning>
+        --h --m --s
+      </span>
+    );
+  }
 
   const totalSeconds = Math.floor(remaining / 1000);
   const hours = Math.floor(totalSeconds / 3600);
@@ -1944,7 +1998,13 @@ function buildReceiptHtml(report: CivicReport): string {
     row("Ward", escapeHtml(wardLabel(report.ward))),
     row("Location", escapeHtml(report.extracted_location)),
     row("Department", escapeHtml(report.department)),
-    row("SLA response window", `${report.sla_hours} hours`),
+    row("SLA tier", slapolicyLabel(report.urgency_score)),
+    row(
+      "Dispatch window",
+      report.urgency_score >= 5
+        ? "Emergency dispatch within 2 hours"
+        : `Resolve by ${deadline.toLocaleString("en-IN")}`,
+    ),
     row("SLA remaining (snapshot)", `${hours}h ${minutes}m`),
     row("Issued", issuedAt.toLocaleString("en-IN")),
     row("Geotag", `${formatCoordinate(report.lat)}, ${formatCoordinate(report.lng)}`),
