@@ -1,11 +1,25 @@
 import { ApiError, GoogleGenAI, Type } from "@google/genai";
 import { NextResponse } from "next/server";
 
-const MODEL_CASCADE = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
+type CascadeTier = "primary" | "lite" | "deep";
+
+type CascadeModel = {
+  id: string;
+  tier: CascadeTier;
+  supportsThinkingBudget: boolean;
+  baseConfidence: number;
+};
+
+const MODEL_CASCADE: readonly CascadeModel[] = [
+  { id: "gemini-3.8-flash", tier: "primary", supportsThinkingBudget: true, baseConfidence: 0.97 },
+  { id: "gemini-3.1-flash-lite", tier: "lite", supportsThinkingBudget: true, baseConfidence: 0.9 },
+  { id: "gemini-3.5-flash", tier: "deep", supportsThinkingBudget: true, baseConfidence: 0.95 },
 ] as const;
+
+const HEURISTIC_ACTIVE_MODEL = "heuristic-fail-safe";
+const HEURISTIC_MIN_CONFIDENCE = 0.7;
+const HEURISTIC_MAX_CONFIDENCE = 0.78;
+const MISSING_FIELD_PENALTY = 0.03;
 
 const DEFAULT_LAT = 23.8103;
 const DEFAULT_LNG = 90.4125;
@@ -207,9 +221,20 @@ type AnalyzedResult = {
   lng: number;
   created_at: string;
   is_fallback: boolean;
+  active_model: string;
   latency_ms: number;
   confidence: number;
 };
+
+class ModelOutputError extends Error {
+  constructor(
+    message: string,
+    readonly model: string,
+  ) {
+    super(message);
+    this.name = "ModelOutputError";
+  }
+}
 
 function toFiniteNumber(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -331,7 +356,9 @@ function heuristicAnalyze(inputText: string, lat: number, lng: number, latencyMs
     (category !== FALLBACK_CATEGORY ? 1 : 0) +
     (location !== FALLBACK_LOCATION ? 1 : 0) +
     (inputText.trim().length >= 20 ? 1 : 0);
-  const confidence = Math.min(0.9, Math.max(0.5, 0.5 + signals * 0.07));
+  const span = HEURISTIC_MAX_CONFIDENCE - HEURISTIC_MIN_CONFIDENCE;
+  const confidence =
+    HEURISTIC_MIN_CONFIDENCE + Math.min(1, signals / 8) * span;
 
   return {
     category,
@@ -346,6 +373,7 @@ function heuristicAnalyze(inputText: string, lat: number, lng: number, latencyMs
     lng,
     created_at: new Date().toISOString(),
     is_fallback: true,
+    active_model: HEURISTIC_ACTIVE_MODEL,
     latency_ms: latencyMs,
     confidence: Math.round(confidence * 100) / 100,
   };
@@ -401,14 +429,14 @@ function buildResponseSchema() {
 
 async function attemptWithModel(
   ai: GoogleGenAI,
-  model: string,
+  target: CascadeModel,
   inputText: string,
   lat: number,
   lng: number,
-  latencyMs: number,
+  startedAt: number,
 ): Promise<AnalyzedResult> {
   const response = await ai.models.generateContent({
-    model,
+    model: target.id,
     contents: buildUserPrompt(inputText, lat, lng),
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
@@ -417,60 +445,100 @@ async function attemptWithModel(
       temperature: 0,
       maxOutputTokens: 1200,
       abortSignal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+      ...(target.supportsThinkingBudget ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
   });
 
-  return normalizeGeminiResult(response.text ?? "{}", inputText, lat, lng, latencyMs);
+  return normalizeGeminiResult(
+    response.text ?? "",
+    target,
+    inputText,
+    lat,
+    lng,
+    Date.now() - startedAt,
+  );
 }
 
 function normalizeGeminiResult(
   rawText: string,
+  target: CascadeModel,
   inputText: string,
   lat: number,
   lng: number,
   latencyMs: number,
 ): AnalyzedResult {
-  let record: Record<string, unknown> = {};
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new ModelOutputError("model returned an empty completion", target.id);
+  }
+
+  let record: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(rawText) as unknown;
-    if (parsed && typeof parsed === "object") record = parsed as Record<string, unknown>;
-  } catch {
-    record = {};
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new ModelOutputError("model returned a non-object JSON payload", target.id);
+    }
+    record = parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof ModelOutputError) throw error;
+    throw new ModelOutputError(
+      `model returned unparseable JSON (${trimmed.slice(0, 120)})`,
+      target.id,
+    );
+  }
+
+  const categoryText = cleanText(record.category);
+  const summaryText = cleanText(record.summary_en);
+  const urgencyValue = record.urgency_score;
+  if (!categoryText || !summaryText || typeof urgencyValue !== "number") {
+    throw new ModelOutputError(
+      `model response failed schema validation (keys: ${Object.keys(record).join(",") || "none"})`,
+      target.id,
+    );
   }
 
   const haystack = inputText.toLowerCase();
-  const rawCategory = cleanText(record.category) ?? FALLBACK_CATEGORY;
-  const summary = cleanText(record.summary_en) ?? (inputText.trim() || rawCategory);
-  const summaryHaystack = summary.toLowerCase();
+  const summaryHaystack = summaryText.toLowerCase();
 
   const hazardSignalled =
     isCriticalHazard(haystack) ||
     isCriticalHazard(summaryHaystack) ||
-    rawCategory.toLowerCase().includes("hazard") ||
-    rawCategory.toLowerCase().includes("grid");
+    categoryText.toLowerCase().includes("hazard") ||
+    categoryText.toLowerCase().includes("grid");
 
-  const category = hazardSignalled ? HAZARD_CATEGORY : rawCategory;
-  const urgency = hazardSignalled ? 5 : clampUrgency(record.urgency_score);
-  const location = cleanText(record.extracted_location) ?? FALLBACK_LOCATION;
-  const action =
-    cleanText(record.actionable_recommendation) ?? compileAction(category, urgency, location);
-  const department =
-    cleanText(record.assigned_department) ??
-    (hazardSignalled ? HAZARD_DEPARTMENT : compileDepartment(category));
+  const category = hazardSignalled ? HAZARD_CATEGORY : categoryText;
+  const urgency = hazardSignalled ? 5 : clampUrgency(urgencyValue);
+  const location = cleanText(record.extracted_location);
+  const action = cleanText(record.actionable_recommendation);
+  const department = cleanText(record.assigned_department);
+  const missingFields = [location, action, department].filter((value) => value === null).length;
+
+  const confidence = Math.max(
+    0.5,
+    target.baseConfidence - missingFields * MISSING_FIELD_PENALTY,
+  );
+
+  if (missingFields > 0) {
+    console.warn(
+      `[CivicAnalyze] ${target.id} omitted ${missingFields} optional field(s); confidence reduced to ${confidence.toFixed(2)}.`,
+    );
+  }
 
   return {
     category,
     urgency_score: urgency,
-    summary_en: summary,
-    extracted_location: location,
-    actionable_recommendation: action,
-    assigned_department: department,
+    summary_en: summaryText,
+    extracted_location: location ?? FALLBACK_LOCATION,
+    actionable_recommendation: action ?? compileAction(category, urgency, location ?? FALLBACK_LOCATION),
+    assigned_department:
+      department ?? (hazardSignalled ? HAZARD_DEPARTMENT : compileDepartment(category)),
     lat,
     lng,
     created_at: new Date().toISOString(),
     is_fallback: false,
+    active_model: target.id,
     latency_ms: latencyMs,
-    confidence: 0.92,
+    confidence: Math.round(confidence * 100) / 100,
   };
 }
 
@@ -507,17 +575,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    for (const model of MODEL_CASCADE) {
+    const failures: string[] = [];
+    for (const target of MODEL_CASCADE) {
       try {
-        return ok(await attemptWithModel(ai, model, inputText, lat, lng, Date.now() - startedAt));
-      } catch (error) {
-        console.warn(
-          `[CivicAnalyze] Model ${model} failed (${describeError(error)}); trying next model.`,
+        return ok(
+          await attemptWithModel(ai, target, inputText, lat, lng, startedAt),
         );
+      } catch (error) {
+        const reason = error instanceof ModelOutputError
+          ? `invalid structured output (${error.message})`
+          : describeError(error);
+        failures.push(`${target.id}: ${reason}`);
+        console.warn(`[CivicAnalyze] Model ${target.id} failed - ${reason}; trying next model.`);
       }
     }
 
-    console.error("[CivicAnalyze] All Gemini models failed - using heuristic fallback.");
+    console.error(
+      `[CivicAnalyze] Every cascade candidate failed; engaging heuristic fail-safe. Detail: ${failures.join(" | ")}`,
+    );
   } catch (error) {
     console.error(
       `[CivicAnalyze] Gemini client error - using heuristic fallback: ${describeError(error)}`,
