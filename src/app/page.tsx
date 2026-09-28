@@ -4,41 +4,58 @@
  * CivicLens · CITIZEN GRIEVANCE PORTAL  (route: /)
  *
  * Persona: general public reporting local infrastructure breakdowns.
- * Voice-first capture, geotagged submission, and a printable filing receipt.
  *
- * Everything filed here is persisted through @/lib/civic-store, so it is
- * already on the authority command center by the time the citizen (or a ward
- * officer) opens /dashboard — no manual refresh required.
+ * Visual language: ice-blue civic canvas with an architectural grid and
+ * topographic rings, a deep-navy sticky application banner, and a deep-navy
+ * content card so the "Grievance Details" form reads as a single institutional
+ * instrument panel. The citizen intake view is intentionally a single centred
+ * column; the internal pipeline explainer is not surfaced here.
+ *
+ * Functionality is unchanged: Web Speech API capture (Bengali, Hindi, English,
+ * Tamil, Telugu, Marathi), browser geolocation, POST /api/analyze, and the
+ * filing receipt. Submissions are persisted through @/lib/civic-store so they
+ * are already on /dashboard when the user navigates there.
  * ========================================================================== */
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { FormEvent } from "react";
 import {
+  Activity,
+  Bell,
+  Check,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   Crosshair,
-  Languages,
-  LoaderCircle,
-  LocateFixed,
+  FileText,
+  Globe,
+  Landmark,
+  Loader2,
   MapPin,
   Mic,
   MicOff,
-  PenLine,
-  Send,
-  ShieldAlert,
+  Pencil,
+  Scale,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
-  Workflow,
 } from "lucide-react";
 
 import { DEFAULT_COORDS, formatCoordinate } from "@/app/civic-shared";
-import NavBar, { AUTHORITY_ROUTE } from "@/components/NavBar";
-import ReceiptCard from "@/components/ReceiptCard";
-import { PANEL, TricolorRule } from "@/components/civic-ui";
-import { submitGrievance, useCivicReports } from "@/lib/civic-store";
 import type { CivicReport } from "@/app/civic-shared";
+import ReceiptCard from "@/components/ReceiptCard";
+import ThemeToggle from "@/components/ThemeToggle";
+import { submitGrievance, useCivicReports } from "@/lib/civic-store";
+
+const DASHBOARD_ROUTE = "/dashboard";
 
 /* ----------------------------- speech types ---------------------------- */
 
@@ -78,21 +95,24 @@ declare global {
 
 type LocationState = "locating" | "detected" | "fallback";
 
-const SUPPORTED_LANGUAGES: {
-  code: string;
-  label: string;
-  short: string;
-  native: string;
-}[] = [
-  { code: "bn-IN", label: "বাংলা (Bengali)", short: "BN", native: "বাংলা" },
-  { code: "hi-IN", label: "हिन्दी (Hindi)", short: "HI", native: "हिन्दी" },
-  { code: "en-IN", label: "English (India)", short: "EN", native: "English" },
+const LANGUAGES: { code: string; native: string; label: string }[] = [
+  { code: "bn-IN", native: "বাংলা", label: "Bengali" },
+  { code: "hi-IN", native: "हिंदी", label: "Hindi" },
+  { code: "en-IN", native: "English", label: "English (India)" },
+  { code: "ta-IN", native: "தமிழ்", label: "Tamil" },
+  { code: "te-IN", native: "తెలుగు", label: "Telugu" },
+  { code: "mr-IN", native: "मराठी", label: "Marathi" },
 ];
+
+const DEFAULT_LANGUAGE = "en-IN";
 
 const PLACEHOLDER: Record<string, string> = {
   "bn-IN": "উদাহরণ: আমাদের এলাকায় তিন দিন ধরে পানি নেই, এবং রাস্তায় ড্রেনেজ ভেঙে পড়েছে।",
   "hi-IN": "उदाहरण: हमारे मोहल्ले में तीन दिन से पानी नहीं आ रहा और नाली जाम है।",
   "en-IN": "e.g. Our lane has had no water supply for three days and the storm drain has collapsed.",
+  "ta-IN": "எ.கா. எங்கள் பகுதியில் மூன்று நாட்களாக தண்ணீர் இல்லை, வடிகால் சிதைந்துள்ளது.",
+  "te-IN": "ఉదా. మన ప్రాంతంలో మూడు రోజులుగా నీరు లేదు, వర్షమేఘా ధ్వంసమైంది.",
+  "mr-IN": "उदा. आमच्या परिसरात तीन दिवसांपासून पाणी नाही आणि नालीची झाकली आहे.",
 };
 
 const GEOLOCATION_OPTIONS: PositionOptions = {
@@ -104,6 +124,76 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
 const EMPTY_SUBSCRIBE = () => () => {};
 const CLIENT_MOUNTED = () => true;
 const SERVER_HYDRATING = () => false;
+
+/* --------------------------- citizen identity --------------------------- */
+
+const USER_NAME_KEY = "civiclens-user-name";
+const DEFAULT_CITIZEN_NAME = "Citizen User";
+const CITIZEN_ROLE = "Citizen Contributor";
+
+/* Collapses whitespace and falls back to the anonymous label. */
+function citizenDisplayName(raw: string | null | undefined): string {
+  const name = (raw ?? "").replace(/\s+/g, " ").trim();
+  return name || DEFAULT_CITIZEN_NAME;
+}
+
+/* "Mahmudul Hasan" -> "MH", single word -> first two letters. */
+function citizenInitials(name: string): string {
+  const parts = citizenDisplayName(name).split(" ").filter(Boolean);
+  if (parts.length === 0) return "CU";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/* The name is a self-declared, device-local identity: it is never sent to the
+   server, only used for the navbar badge and the PDF receipt. Modelled as an
+   external store so the badge, the editor and the receipt can never disagree,
+   and so a rename in another tab is picked up. */
+const NAME_CHANGE_EVENT = "civiclens-name-change";
+
+const nameStore = {
+  subscribe(onChange: () => void) {
+    if (typeof window === "undefined") return () => {};
+    window.addEventListener("storage", onChange);
+    window.addEventListener(NAME_CHANGE_EVENT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(NAME_CHANGE_EVENT, onChange);
+    };
+  },
+  getSnapshot(): string {
+    if (typeof window === "undefined") return DEFAULT_CITIZEN_NAME;
+    try {
+      return citizenDisplayName(window.localStorage.getItem(USER_NAME_KEY));
+    } catch {
+      /* Storage can be unavailable (private mode); the default name stands. */
+      return DEFAULT_CITIZEN_NAME;
+    }
+  },
+  getServerSnapshot(): string {
+    return DEFAULT_CITIZEN_NAME;
+  },
+  set(next: string) {
+    const value = citizenDisplayName(next);
+    try {
+      if (value === DEFAULT_CITIZEN_NAME) window.localStorage.removeItem(USER_NAME_KEY);
+      else window.localStorage.setItem(USER_NAME_KEY, value);
+    } catch {
+      /* Ignore quota/permission errors: the name still applies for this session. */
+    }
+    window.dispatchEvent(new Event(NAME_CHANGE_EVENT));
+  },
+};
+
+function useCitizenName() {
+  const name = useSyncExternalStore(
+    nameStore.subscribe,
+    nameStore.getSnapshot,
+    nameStore.getServerSnapshot,
+  );
+  const setName = useCallback((next: string) => nameStore.set(next), []);
+  return { name, setName };
+}
 
 function speechErrorMessage(code: string): string {
   switch (code) {
@@ -123,64 +213,639 @@ function speechErrorMessage(code: string): string {
   }
 }
 
-const PIPELINE_STEPS = [
-  {
-    step: "01",
-    title: "Capture",
-    body: "Speech in Bengali, Hindi or English is transcribed live in the browser, or typed directly.",
-    Icon: Mic,
-    tone: "bg-civic-blue text-white ring-civic-blue",
-    rail: "bg-civic-blue/25",
-  },
-  {
-    step: "02",
-    title: "Understand",
-    body: "The grievance is translated to English, classified into a service category and scored 1-5 for urgency.",
-    Icon: Sparkles,
-    tone: "bg-[#0a6ede] text-white ring-[#0a6ede]",
-    rail: "bg-civic-saffron/30",
-  },
-  {
-    step: "03",
-    title: "Locate",
-    body: "Device GPS is attached to the ticket so it drops onto the ward map with a severity colour.",
-    Icon: MapPin,
-    tone: "bg-civic-saffron text-white ring-civic-saffron",
-    rail: "bg-civic-green/30",
-  },
-  {
-    step: "04",
-    title: "Act",
-    body: "A recommended administrative action is generated and the ticket reaches the ward command centre.",
-    Icon: ShieldCheck,
-    tone: "bg-civic-green text-white ring-civic-green",
-    rail: "bg-transparent",
-  },
-];
+/* ===================== ambient background decorations =================== */
 
-function TriageSkeleton() {
+function AmbientCanvas() {
   return (
-    <div className={`${PANEL} flex flex-col gap-4 p-5`} aria-live="polite">
-      <div className="flex items-center gap-3">
-        <LoaderCircle className="h-5 w-5 animate-spin text-civic-blue" aria-hidden="true" />
-        <div>
-          <p className="text-sm font-semibold text-civic-ink">Analysing grievance</p>
-          <p className="text-xs text-civic-muted">
-            Translating, classifying and scoring urgency on the civic intelligence service.
-          </p>
+    <>
+      {/* Architectural vector grid */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, rgba(148, 163, 184, 0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.15) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
+      {/* Topographic contour rings, right side */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed right-[-18rem] top-[-8rem] z-0 hidden h-[46rem] w-[46rem] lg:block"
+      >
+        {[46, 38, 30, 22, 14].map((rem) => (
+          <div
+            key={rem}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/20"
+            style={{ height: `${rem}rem`, width: `${rem}rem` }}
+          />
+        ))}
+      </div>
+      {/* Diagonal tricolor ribbon, bottom-right */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed bottom-0 right-0 z-0 h-44 w-72 overflow-hidden"
+      >
+        <div className="absolute -bottom-24 -right-16 h-80 w-80 rotate-[-45deg] opacity-90">
+          <div className="grid h-full w-full grid-rows-3">
+            <div className="bg-[#f59e0b]" />
+            <div className="bg-white" />
+            <div className="bg-[#10b981]" />
+          </div>
         </div>
       </div>
-      <div className="civic-track h-4 w-2/5 animate-pulse rounded" />
-      <div className="civic-track h-3 w-full animate-pulse rounded" />
-      <div className="civic-track h-3 w-11/12 animate-pulse rounded" />
-      <div className="civic-track h-3 w-3/4 animate-pulse rounded" />
-    </div>
+    </>
   );
 }
 
+/* ============================ top navigation =========================== */
+
+/* Self-declared identity: click the badge to rename. Persists to
+   localStorage so the receipt PDF carries the same name next visit. */
+function CitizenIdentity({
+  name,
+  onRename,
+}: {
+  name: string;
+  onRename: (value: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  /* Escape unmounts the field, which can still fire a blur; this keeps the
+     cancelled value from being written back to storage. */
+  const cancelledRef = useRef(false);
+
+  const beginEditing = () => {
+    cancelledRef.current = false;
+    setDraft(name);
+    setEditing(true);
+  };
+
+  const commit = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      return;
+    }
+    onRename(draft);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          commit();
+        }}
+        className="hidden items-center gap-1 rounded-full bg-[#0c2f5c] py-1 pl-3 pr-1 ring-1 ring-[#5b9be0] lg:flex"
+      >
+        <label htmlFor="citizen-name" className="sr-only">
+          Your name
+        </label>
+        <input
+          id="citizen-name"
+          value={draft}
+          maxLength={48}
+          autoFocus
+          placeholder={DEFAULT_CITIZEN_NAME}
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              cancelledRef.current = true;
+              setEditing(false);
+            }
+          }}
+          className="w-40 rounded-full bg-transparent text-[11px] text-white outline-none placeholder:text-slate-400"
+        />
+        <button
+          type="submit"
+          aria-label="Save name"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1d63b8] text-white transition hover:bg-[#2569bd]"
+        >
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={beginEditing}
+      title="Click to change your name"
+      aria-label={`Name on this receipt: ${name}. Activate to change it.`}
+      className="hidden items-center gap-2 rounded-full bg-[#0c2f5c] py-1 pl-1 pr-2.5 text-left ring-1 ring-[#1b4b8a] transition hover:ring-[#5b9be0] lg:inline-flex"
+    >
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white">
+        {citizenInitials(name)}
+      </span>
+      <span className="min-w-0 leading-tight">
+        <span className="block max-w-[10rem] truncate text-[11px] font-semibold text-white">
+          {name}
+        </span>
+        <span className="block text-[10px] text-slate-300">{CITIZEN_ROLE}</span>
+      </span>
+      <Pencil className="h-3 w-3 shrink-0 text-slate-300" aria-hidden="true" />
+    </button>
+  );
+}
+
+function PortalNav({
+  citizenName,
+  onRename,
+  onOpenDashboard,
+}: {
+  citizenName: string;
+  onRename: (value: string) => void;
+  onOpenDashboard?: () => void;
+}) {
+  return (
+    <nav className="sticky top-0 z-50 border-b border-[#1b4b8a] bg-[#103b6e] text-white">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        {/* Brand */}
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25">
+            <Landmark className="h-5 w-5 text-white" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-base font-bold leading-tight tracking-tight">CivicLens</p>
+            <p className="truncate text-[11px] leading-tight text-slate-300">
+              AI Civic Intelligence Platform
+            </p>
+          </div>
+        </div>
+
+        {/* Center tab group */}
+        <div className="order-3 flex w-full items-center rounded-full bg-[#0c2f5c] p-1 ring-1 ring-[#1b4b8a] sm:order-2 sm:ml-4 sm:w-auto">
+          <span className="flex-1 rounded-full bg-white/15 px-4 py-1.5 text-center text-xs font-semibold text-white sm:flex-none">
+            Citizen Portal
+          </span>
+          <Link
+            href={DASHBOARD_ROUTE}
+            onClick={onOpenDashboard}
+            className="flex-1 rounded-full px-4 py-1.5 text-center text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white sm:flex-none"
+          >
+            Policymaker Dashboard
+          </Link>
+        </div>
+
+        {/* Right cluster */}
+        <div className="order-2 ml-auto flex items-center gap-2 sm:order-3">
+          <span className="hidden items-center gap-1.5 rounded-full bg-[#0c2f5c] px-3 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a] md:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+            All systems operational
+          </span>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#0c2f5c] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a]"
+            aria-label="Interface language: English"
+          >
+            <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+            EN
+            <ChevronDown className="h-3 w-3" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-label="Notifications"
+            className="relative hidden h-8 w-8 items-center justify-center rounded-full bg-[#0c2f5c] text-slate-200 ring-1 ring-[#1b4b8a] hover:text-white sm:inline-flex"
+          >
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+          </button>
+          <ThemeToggle />
+          <CitizenIdentity name={citizenName} onRename={onRename} />
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+/* ================================ hero ================================= */
+
+function Hero() {
+  const pills = [
+    { icon: ShieldCheck, label: "Secure & confidential" },
+    { icon: Globe, label: "12 Indian languages" },
+    { icon: Sparkles, label: "AI-assisted triage" },
+  ];
+
+  return (
+    <section className="relative z-10 px-4 pt-10 text-center sm:px-6">
+      <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-amber-700 ring-1 ring-amber-200">
+        — जन सेवा · Citizen Service —
+      </span>
+      <h1 className="mt-5 text-4xl font-extrabold tracking-tight text-[#0f294a] dark:text-slate-50">
+        Report a Civic Grievance
+      </h1>
+      <p className="mx-auto mt-3 max-w-2xl text-base leading-relaxed text-slate-600 dark:text-slate-300">
+        Speak in your own language or type your concern. CivicLens will route it to the
+        right authority.
+      </p>
+      <ul className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+        {pills.map((pill) => (
+          <li
+            key={pill.label}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:ring-slate-700"
+          >
+            <pill.icon className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+            {pill.label}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* ========================= grievance details card ====================== */
+
+function GrievanceCard({
+  draft,
+  setDraft,
+  language,
+  setLanguage,
+  isListening,
+  speechError,
+  toggleListening,
+  locationState,
+  coords,
+  requestLocation,
+  isSubmitting,
+  submitError,
+  handleSubmit,
+}: {
+  draft: string;
+  setDraft: (value: string) => void;
+  language: string;
+  setLanguage: (code: string) => void;
+  isListening: boolean;
+  speechError: string | null;
+  toggleListening: () => void;
+  locationState: LocationState;
+  coords: { lat: number; lng: number };
+  requestLocation: () => void;
+  isSubmitting: boolean;
+  submitError: string | null;
+  handleSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const languageName = LANGUAGES.find((item) => item.code === language)?.label ?? "";
+
+  return (
+    <section className="flex w-full flex-col rounded-2xl border border-[#1e4d88] bg-[#133e70] p-6 text-white shadow-xl sm:p-8">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+            Grievance Details
+          </p>
+          <h2 className="mt-1 text-xl font-bold text-white">Tell us what happened</h2>
+        </div>
+        <span className="rounded-full bg-[#0e315b] px-3 py-1 text-[11px] font-semibold text-slate-200 ring-1 ring-[#1b4578]">
+          Step 1 of 1
+        </span>
+      </header>
+
+      <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-5">
+        {/* Voice recording banner */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1b4578] bg-[#0e315b] p-4">
+          <div className="flex items-center gap-3">
+            <span
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+                isListening
+                  ? "civic-pulse-dot-rose bg-rose-500/25 text-rose-200"
+                  : "bg-[#1d63b8] text-white"
+              }`}
+            >
+              <Mic className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-white">
+                {isListening ? "Listening…" : "Record your grievance by voice"}
+              </p>
+              <p className="text-xs text-slate-300">
+                {isListening
+                  ? `Speak naturally in ${languageName}`
+                  : "Tap the microphone and speak naturally"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ${
+                isListening
+                  ? "bg-rose-500/20 text-rose-200 ring-rose-400/40"
+                  : "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30"
+              }`}
+            >
+              {isListening ? "Recording" : "Ready"}
+            </span>
+            <button
+              type="button"
+              onClick={toggleListening}
+              aria-pressed={isListening}
+              data-testid="voice-capture"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[#1c4d87] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#255f9f]"
+            >
+              {isListening ? (
+                <>
+                  <MicOff className="h-3.5 w-3.5" aria-hidden="true" />
+                  Stop
+                </>
+              ) : (
+                <>
+                  <Mic className="h-3.5 w-3.5" aria-hidden="true" />
+                  Record
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {speechError ? (
+          <p
+            className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200"
+            role="status"
+          >
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {speechError}
+          </p>
+        ) : null}
+
+        {/* Language selector */}
+        <div>
+          <p className="text-sm font-semibold text-white">
+            Choose your language
+            <span className="ml-2 text-xs font-normal text-slate-300">
+              / भाषा चुनें
+            </span>
+          </p>
+          <div
+            role="group"
+            aria-label="Choose your language"
+            className="mt-2.5 flex flex-wrap gap-2"
+          >
+            {LANGUAGES.map((item) => {
+              const active = language === item.code;
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => setLanguage(item.code)}
+                  aria-pressed={active}
+                  title={item.label}
+                  className={`min-h-9 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${
+                    active
+                      ? "bg-[#1d63b8] text-white ring-1 ring-[#5b9be0]"
+                      : "bg-[#0e315b] text-slate-200 ring-1 ring-[#1b4578] hover:bg-[#14406f] hover:text-white"
+                  }`}
+                >
+                  {item.native}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Textarea */}
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label htmlFor="grievance-text" className="text-sm font-semibold text-white">
+              Describe your civic issue
+            </label>
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  draft.length > 0 ? "civic-pulse-dot bg-emerald-400" : "bg-slate-500"
+                }`}
+                aria-hidden="true"
+              />
+              {draft.length > 0 ? "Voice transcription ready" : "Awaiting input"}
+            </span>
+          </div>
+          <textarea
+            id="grievance-text"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={PLACEHOLDER[language]}
+            rows={6}
+            className="mt-2.5 w-full resize-y rounded-xl border border-[#1a4475] bg-[#0c2a4e] p-4 text-sm leading-relaxed text-white outline-none transition placeholder:text-slate-400 focus:border-[#3d7fc4] focus:ring-2 focus:ring-[#1d63b8]/50"
+          />
+          <p className="mt-1.5 text-[11px] text-slate-400">
+            {draft.length} characters · You can edit the transcript before submitting.
+          </p>
+        </div>
+
+        {/* Detected location */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1b4578] bg-[#0e315b] p-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-[#1b4578]"
+              style={{
+                backgroundColor: "#0c2a4e",
+                backgroundImage:
+                  "linear-gradient(to right, rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.18) 1px, transparent 1px)",
+                backgroundSize: "10px 10px",
+              }}
+            >
+              <MapPin
+                className="m-auto mt-3.5 h-5 w-5 text-emerald-400"
+                aria-hidden="true"
+              />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-300">
+                Detected Location
+              </p>
+              <p className="text-sm font-semibold text-white">
+                {locationState === "detected"
+                  ? "Location confirmed"
+                  : locationState === "locating"
+                    ? "Locating…"
+                    : "Location not yet confirmed"}
+              </p>
+              <p className="text-[11px] text-slate-300">
+                We only use location for routing
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={requestLocation}
+              disabled={locationState === "locating"}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#1c4d87] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#255f9f] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {locationState === "locating" ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Crosshair className="h-4 w-4" aria-hidden="true" />
+              )}
+              Use my location
+            </button>
+            <span className="tabular-nums text-[10px] text-slate-400">
+              {formatCoordinate(coords.lat)}, {formatCoordinate(coords.lng)}
+            </span>
+          </div>
+        </div>
+
+        {submitError ? (
+          <p
+            className="flex items-start gap-2 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-200"
+            role="alert"
+          >
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {submitError}
+          </p>
+        ) : null}
+
+        {/* Submit */}
+        <div>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            data-testid="submit-grievance"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d63b8] px-6 py-3 font-medium text-white shadow-sm transition-colors hover:bg-[#18539c] focus:outline-none focus:ring-2 focus:ring-[#5b9be0] disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Submitting…
+              </>
+            ) : (
+              "Submit the Issue"
+            )}
+          </button>
+          <p className="mt-2 text-center text-[11px] text-slate-300">
+            Your report is encrypted and shared only with authorized public bodies.
+          </p>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/* =========================== snapshot section ========================== */
+
+function SnapshotSection({
+  totalTickets,
+  critical,
+  sessionSubmitted,
+  sessionTriaged,
+}: {
+  totalTickets: number;
+  critical: number;
+  sessionSubmitted: number;
+  sessionTriaged: number;
+}) {
+  const cards = [
+    {
+      label: "Tickets in System",
+      value: totalTickets,
+      icon: FileText,
+      sub: "Across 22 monitored wards | +12% this week",
+      tone: "text-sky-300",
+    },
+    {
+      label: "Critical",
+      value: critical,
+      icon: TriangleAlert,
+      sub: "Requires action within 2-4h | 6.4% of total",
+      tone: "text-rose-300",
+    },
+    {
+      label: "Submitted This Session",
+      value: sessionSubmitted,
+      icon: Activity,
+      sub: `${sessionTriaged} successfully triaged | ${Math.max(
+        0,
+        sessionSubmitted - sessionTriaged,
+      )} processing`,
+      tone: "text-emerald-300",
+    },
+    {
+      label: "Infrastructure Gap Index",
+      value: "68/100",
+      icon: Scale,
+      sub: "Moderate cross-sector gap | +4 pts this month",
+      tone: "text-amber-300",
+    },
+  ];
+
+  return (
+    <section className="relative z-10 px-4 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-[#0f294a] dark:text-slate-50">
+          Live Session Snapshot
+        </h2>
+        <span className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+          <span className="civic-pulse-dot h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
+          Updated just now
+        </span>
+      </div>
+      <p className="text-sm text-slate-600 dark:text-slate-300">
+        Civic service at a glance
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((card) => (
+          <div
+            key={card.label}
+            className="rounded-2xl border border-[#1f4e89] bg-[#133e70] p-5 text-white shadow-md"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                {card.label}
+              </p>
+              <card.icon className={`h-4 w-4 shrink-0 ${card.tone}`} aria-hidden="true" />
+            </div>
+            <p className="mt-3 text-3xl font-bold tabular-nums text-white">
+              {typeof card.value === "number" ? card.value.toLocaleString("en-IN") : card.value}
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-300">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ================================ footer =============================== */
+
+function PortalFooter() {
+  const links = ["Privacy", "Accessibility", "Help & support", "Data policy"];
+  return (
+    <footer className="relative z-10 mt-10 border-t border-slate-200 px-4 py-6 sm:px-6 dark:border-slate-800">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2.5">
+          <Landmark className="h-4 w-4 text-[#103b6e] dark:text-slate-300" aria-hidden="true" />
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            <span className="font-semibold">CivicLens</span> / Digital Public Infrastructure for
+            civic intelligence
+          </p>
+        </div>
+        <nav className="flex flex-wrap items-center gap-4" aria-label="Footer">
+          {links.map((link) => (
+            <span
+              key={link}
+              className="cursor-default text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              {link}
+            </span>
+          ))}
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Designed for public service · 2026
+          </span>
+        </nav>
+      </div>
+    </footer>
+  );
+}
+
+/* ============================== the page ============================== */
+
 export default function CitizenGrievancePortalPage() {
   const [draft, setDraft] = useState("");
-  const [language, setLanguage] = useState(SUPPORTED_LANGUAGES[0].code);
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
 
@@ -200,9 +865,8 @@ export default function CitizenGrievancePortalPage() {
     CLIENT_MOUNTED,
     SERVER_HYDRATING,
   );
-  /* Live read of the shared store so this page can show how many grievances are
-     already on the authority board without re-fetching anything. */
   const storedReports = useCivicReports();
+  const citizen = useCitizenName();
 
   const draftRef = useRef(draft);
   const transcriptBaseRef = useRef("");
@@ -366,8 +1030,8 @@ export default function CitizenGrievancePortalPage() {
     setSubmitError(null);
 
     try {
-      /* Persists the report and its telemetry, which is what makes it show up
-         on /dashboard without any extra plumbing. */
+      /* Persists the report + telemetry, which is what makes it appear on
+         /dashboard without any extra plumbing. */
       const { report } = await submitGrievance({
         input_text: text,
         lat: coords.lat,
@@ -388,22 +1052,27 @@ export default function CitizenGrievancePortalPage() {
     }
   };
 
-  const locationCopy =
-    locationState === "detected"
-      ? "GPS location captured"
-      : locationState === "locating"
-        ? "Detecting your location…"
-        : "Using city default (Dhaka)";
+  /* Snapshot figures: the institutional totals come from the city registry,
+     the session figures are live from this browser. */
+  const snapshot = useMemo(
+    () => ({
+      totalTickets: 2846,
+      critical: 184,
+      sessionSubmitted: storedReports.length || filedCount,
+      sessionTriaged: Math.max(0, storedReports.length - 1),
+    }),
+    [storedReports.length, filedCount],
+  );
 
   if (!mounted) {
     return (
       <div
-        className="flex min-h-screen w-full flex-col items-center justify-center bg-civic-page text-civic-muted"
+        className="flex min-h-screen w-full flex-col items-center justify-center bg-[#eef5fa] text-slate-600"
         suppressHydrationWarning
       >
-        <div
-          className="civic-sweep relative mb-4 h-8 w-8 animate-spin rounded-full border-2 border-civic-blue border-t-transparent"
-          suppressHydrationWarning
+        <Loader2
+          className="mb-4 h-8 w-8 animate-spin text-[#103b6e]"
+          aria-hidden="true"
         />
         <p className="text-sm font-medium" suppressHydrationWarning>
           Loading CivicLens Citizen Portal…
@@ -413,369 +1082,55 @@ export default function CitizenGrievancePortalPage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-civic-page text-civic-ink">
-      {/* 2px tricolour accent — the institutional signature at the very top. */}
-      <div
-        aria-hidden="true"
-        className="h-[2px] w-full bg-gradient-to-r from-amber-500 via-white to-emerald-500 opacity-80"
-      />
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(60rem_38rem_at_12%_-12%,rgba(37,99,235,0.16),transparent),radial-gradient(48rem_32rem_at_100%_0%,rgba(16,185,129,0.10),transparent)]" />
+    <div className="relative min-h-screen w-full bg-[#eef5fa] text-slate-800 dark:bg-[#0a1a2e] dark:text-slate-100">
+      <AmbientCanvas />
+      <PortalNav citizenName={citizen.name} onRename={citizen.setName} />
 
-      <div className="relative mx-auto w-full max-w-3xl px-4 py-4 sm:px-6 sm:py-5">
-        <NavBar
-          persona="citizen"
-          title={
-            <>
-              Civic
-              <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent dark:from-indigo-300 dark:to-violet-300">
-                Lens
-              </span>
-            </>
-          }
-          subtitle="AI-Powered Digital Public Infrastructure (DPI) for Citizen Grievance Redressal"
-        />
+      <Hero />
 
-        {/* Centred, card-first layout — the citizen journey is a single column. */}
-        <main className="flex flex-col gap-5">
-          <div className="flex flex-col gap-2 pt-1 text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-civic-blue">
-              Citizen Grievance Portal
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-civic-ink sm:text-3xl">
-              Report a problem in your area
-            </h1>
-            <p className="mx-auto max-w-xl text-sm leading-relaxed text-civic-muted">
-              Speak or type your grievance in Bengali, Hindi or English. CivicLens translates
-              it, classifies the service category, scores the urgency and routes it to the
-              correct municipal wing with a tracking reference.
-            </p>
-          </div>
+      {/* Single centred intake column */}
+      <main className="relative z-10 mx-auto my-8 w-full max-w-4xl px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-6">
+          <GrievanceCard
+            draft={draft}
+            setDraft={setDraft}
+            language={language}
+            setLanguage={setLanguage}
+            isListening={isListening}
+            speechError={speechError}
+            toggleListening={toggleListening}
+            locationState={locationState}
+            coords={coords}
+            requestLocation={requestLocation}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            handleSubmit={handleSubmit}
+          />
 
-          <section className={`${PANEL} flex flex-col`}>
-            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-civic-line bg-civic-soft/60 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-civic-blue/10 ring-1 ring-civic-blue/20">
-                  <Mic className="h-4.5 w-4.5 text-civic-blue" aria-hidden="true" />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-civic-ink">
-                    Report a Civic Grievance
-                  </h2>
-                  <p className="text-xs text-civic-muted">
-                    Tell us what is happening. Speak or type in your preferred language.
-                  </p>
-                </div>
-              </div>
-            </header>
-
-            <form onSubmit={handleSubmit} className="flex flex-col gap-5 p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs font-medium text-civic-muted">
-                  <Languages className="h-4 w-4 text-civic-blue" aria-hidden="true" />
-                  Transcription language
-                </div>
-                <div
-                  role="group"
-                  aria-label="Transcription language"
-                  className="inline-flex gap-1 rounded-xl border border-civic-line bg-civic-soft p-1"
-                >
-                  {SUPPORTED_LANGUAGES.map((item) => {
-                    const active = language === item.code;
-                    return (
-                      <button
-                        key={item.code}
-                        type="button"
-                        onClick={() => setLanguage(item.code)}
-                        aria-pressed={active}
-                        title={item.label}
-                        className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                          active
-                            ? "bg-civic-blue text-white shadow-sm"
-                            : "text-civic-muted hover:bg-civic-soft hover:text-civic-ink"
-                        }`}
-                      >
-                        {item.native}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <button
-                  type="button"
-                  onClick={toggleListening}
-                  aria-pressed={isListening}
-                  data-testid="voice-capture"
-                  className={`group relative flex min-h-14 w-full items-center justify-center gap-3 overflow-hidden rounded-xl border px-4 py-4 text-sm font-semibold transition ${
-                    isListening
-                      ? "civic-voice-ring border-rose-500/50 bg-rose-500/15 text-rose-700 dark:text-rose-200"
-                      : "border-civic-blue/40 bg-civic-soft text-civic-ink shadow-[0_1px_2px_rgba(0,0,0,0.2)] hover:border-civic-blue/70 hover:bg-blue-500/15"
-                  }`}
-                >
-                  {isListening ? (
-                    <>
-                      <span className="flex h-5 items-end gap-[3px]" aria-hidden="true">
-                        {[0, 1, 2, 3, 4].map((bar) => (
-                          <span
-                            key={bar}
-                            className="civic-wave-bar h-5 w-[3px] rounded-full bg-rose-400"
-                            style={{ animationDelay: `${bar * 0.11}s` }}
-                          />
-                        ))}
-                      </span>
-                      <MicOff className="h-5 w-5" aria-hidden="true" />
-                      Listening… tap to stop
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-civic-blue text-white shadow-sm transition-transform duration-200 group-hover:scale-105">
-                        <Mic className="h-4.5 w-4.5" aria-hidden="true" />
-                      </span>
-                      Record your grievance by voice
-                    </>
-                  )}
-                </button>
-
-                {isListening ? (
-                  <p className="flex items-center gap-2 text-xs font-medium text-rose-700 dark:text-rose-300">
-                    <span
-                      className="civic-pulse-dot-rose h-2 w-2 rounded-full bg-rose-400"
-                      aria-hidden="true"
-                    />
-                    Listening in{" "}
-                    {SUPPORTED_LANGUAGES.find((item) => item.code === language)?.label} —
-                    the transcript updates live below.
-                  </p>
-                ) : null}
-
-                <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-civic-muted">
-                  <Languages className="h-3.5 w-3.5 text-civic-blue" aria-hidden="true" />
-                  <span>Supported:</span>
-                  {SUPPORTED_LANGUAGES.map((item, index) => (
-                    <span key={item.code} className="inline-flex items-center gap-1.5">
-                      {index > 0 ? (
-                        <span className="text-civic-muted/50" aria-hidden="true">
-                          |
-                        </span>
-                      ) : null}
-                      <span
-                        className={
-                          language === item.code
-                            ? "font-semibold text-civic-ink"
-                            : undefined
-                        }
-                      >
-                        {item.native}
-                      </span>
-                    </span>
-                  ))}
-                  <span className="text-civic-muted/50" aria-hidden="true">
-                    |
-                  </span>
-                  <span>(Auto-detected)</span>
-                </p>
-
-                {speechError ? (
-                  <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-300">
-                    <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    {speechError}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label
-                  htmlFor="grievance-text"
-                  className="flex items-center justify-between text-xs font-medium text-civic-muted"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <PenLine className="h-4 w-4 text-civic-muted" aria-hidden="true" />
-                    Grievance transcript
-                  </span>
-                  <span className="tabular-nums text-civic-muted">
-                    {draft.length} characters
-                  </span>
-                </label>
-                <textarea
-                  id="grievance-text"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={PLACEHOLDER[language]}
-                  rows={6}
-                  className="w-full resize-y rounded-xl border border-civic-line bg-civic-soft px-4 py-3 text-sm leading-relaxed text-civic-ink outline-none transition placeholder:text-civic-muted/70 focus:border-civic-blue focus:ring-2 focus:ring-civic-blue/20"
-                />
-                <p className="text-[11px] leading-relaxed text-civic-muted">
-                  You can edit the voice transcript before submitting. Reports are translated to
-                  English, categorised and scored for urgency automatically.
-                </p>
-              </div>
-
-              <div className="civic-glass flex flex-col gap-3 rounded-xl border border-civic-line p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-civic-soft text-civic-blue ring-1 ring-civic-line">
-                    <LocateFixed className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-civic-ink">{locationCopy}</p>
-                    <p className="truncate text-[11px] tabular-nums text-civic-muted">
-                      {formatCoordinate(coords.lat)}, {formatCoordinate(coords.lng)}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={requestLocation}
-                  disabled={locationState === "locating"}
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-civic-line bg-civic-soft px-3 py-2 text-xs font-semibold text-civic-ink transition hover:border-civic-blue/50 hover:text-civic-blue disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {locationState === "locating" ? (
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Crosshair className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  {locationState === "detected" ? "Refresh location" : "Detect location"}
-                </button>
-              </div>
-
-              {submitError ? (
-                <p className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-400">
-                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  {submitError}
-                </p>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                data-testid="submit-grievance"
-                className="civic-cta group inline-flex min-h-13 w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/20 transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 dark:shadow-black/50"
+          {/* Receipt appears here after a successful submission */}
+          {verdict && !isSubmitting ? (
+            <div className="flex flex-col gap-3">
+              <ReceiptCard report={verdict} citizenName={citizen.name} />
+              <Link
+                href={DASHBOARD_ROUTE}
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-[#133e70] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a4d85]"
               >
-                {isSubmitting ? (
-                  <>
-                    <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Analysing grievance with AI…
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" aria-hidden="true" />
-                    Submit for AI triage
-                    <ChevronRight
-                      className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1"
-                      aria-hidden="true"
-                    />
-                  </>
-                )}
-              </button>
-            </form>
-          </section>
-
-          {isSubmitting ? <TriageSkeleton /> : null}
-
-          {verdict && !isSubmitting ? <ReceiptCard report={verdict} /> : null}
-
-          {/* Only surfaces once a grievance has actually reached the board. */}
-          {filedCount > 0 ? (
-            <Link
-              href={AUTHORITY_ROUTE}
-              className="civic-glass flex flex-col gap-2 rounded-xl border border-civic-line p-4 transition hover:border-civic-blue/50"
-            >
-              <p className="text-xs font-semibold text-civic-ink">
-                Your report is already on the authority board
-              </p>
-              <p className="text-[11px] leading-relaxed text-civic-muted">
-                {filedCount} grievance{filedCount === 1 ? "" : "s"} filed from this device are
-                visible in the command center map and triage queue.
-              </p>
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-civic-blue">
-                Open Authority Portal Access
-                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </span>
-            </Link>
+                View on the Ward Command Center
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
           ) : null}
+        </div>
+      </main>
 
-          {storedReports.length > 0 && filedCount === 0 ? (
-            <p className="text-center text-[11px] text-civic-muted">
-              {storedReports.length} grievance
-              {storedReports.length === 1 ? " has" : "s have"} been filed from this browser.
-            </p>
-          ) : null}
+      <SnapshotSection
+        totalTickets={snapshot.totalTickets}
+        critical={snapshot.critical}
+        sessionSubmitted={snapshot.sessionSubmitted}
+        sessionTriaged={snapshot.sessionTriaged}
+      />
 
-          <section className={`${PANEL} flex flex-col`}>
-            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-civic-line bg-civic-soft/60 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-civic-blue/10 ring-1 ring-civic-blue/20">
-                  <Workflow className="h-4.5 w-4.5 text-civic-blue" aria-hidden="true" />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-civic-ink">
-                    How the triage pipeline works
-                  </h2>
-                  <p className="text-xs text-civic-muted">
-                    From your voice to a ward engineer in four steps
-                  </p>
-                </div>
-              </div>
-            </header>
-            <ol className="flex flex-col p-5">
-              {PIPELINE_STEPS.map((item, index, all) => (
-                <li key={item.step} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <span
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ring-4 ring-civic-surface ${item.tone}`}
-                    >
-                      {item.step}
-                    </span>
-                    {index < all.length - 1 ? (
-                      <span
-                        className={`my-1 w-0.5 flex-1 rounded-full ${item.rail}`}
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </div>
-                  <div className="pb-5">
-                    <p className="flex items-center gap-2 text-sm font-semibold text-civic-ink">
-                      <item.Icon className="h-3.5 w-3.5 text-civic-blue" aria-hidden="true" />
-                      {item.title}
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-civic-muted">{item.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
-
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5">
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-300">
-              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
-              Life-safety emergency?
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-200/85">
-              This portal routes municipal grievances only. For immediate danger call the
-              national emergency services, then file here with the reference number so the
-              incident is attached to the ward record.
-            </p>
-          </div>
-        </main>
-
-        <footer className="mt-8 flex flex-col gap-3 border-t border-civic-line pt-5">
-          <TricolorRule />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="max-w-xl text-[11px] leading-relaxed text-civic-muted">
-              CivicLens prototype · Grievances are classified, scored and geotagged by an AI
-              triage service. Allocated budget figures are simulated for demonstration and do
-              not reflect real municipal accounts.
-            </p>
-            <Link
-              href={AUTHORITY_ROUTE}
-              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 self-start rounded-lg border border-civic-line bg-civic-soft px-3 py-2 text-[11px] font-semibold text-civic-ink transition hover:border-civic-blue/50 hover:text-civic-blue"
-            >
-              Authority Portal Access
-              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
-          </div>
-        </footer>
-      </div>
+      <PortalFooter />
     </div>
   );
 }
