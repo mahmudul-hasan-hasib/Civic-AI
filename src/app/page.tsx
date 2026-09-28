@@ -30,7 +30,6 @@ import type { FormEvent } from "react";
 import {
   Activity,
   Bell,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -42,7 +41,6 @@ import {
   MapPin,
   Mic,
   MicOff,
-  Pencil,
   Scale,
   ShieldCheck,
   Sparkles,
@@ -52,7 +50,9 @@ import {
 import { DEFAULT_COORDS, formatCoordinate } from "@/app/civic-shared";
 import type { CivicReport } from "@/app/civic-shared";
 import ReceiptCard from "@/components/ReceiptCard";
+import { RoleSwitcher, UserIdentityBadge } from "@/components/RoleControls";
 import ThemeToggle from "@/components/ThemeToggle";
+import { useAuth } from "@/context/AuthContext";
 import { submitGrievance, useCivicReports } from "@/lib/civic-store";
 
 const DASHBOARD_ROUTE = "/dashboard";
@@ -125,76 +125,6 @@ const EMPTY_SUBSCRIBE = () => () => {};
 const CLIENT_MOUNTED = () => true;
 const SERVER_HYDRATING = () => false;
 
-/* --------------------------- citizen identity --------------------------- */
-
-const USER_NAME_KEY = "civiclens-user-name";
-const DEFAULT_CITIZEN_NAME = "Citizen User";
-const CITIZEN_ROLE = "Citizen Contributor";
-
-/* Collapses whitespace and falls back to the anonymous label. */
-function citizenDisplayName(raw: string | null | undefined): string {
-  const name = (raw ?? "").replace(/\s+/g, " ").trim();
-  return name || DEFAULT_CITIZEN_NAME;
-}
-
-/* "Mahmudul Hasan" -> "MH", single word -> first two letters. */
-function citizenInitials(name: string): string {
-  const parts = citizenDisplayName(name).split(" ").filter(Boolean);
-  if (parts.length === 0) return "CU";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-/* The name is a self-declared, device-local identity: it is never sent to the
-   server, only used for the navbar badge and the PDF receipt. Modelled as an
-   external store so the badge, the editor and the receipt can never disagree,
-   and so a rename in another tab is picked up. */
-const NAME_CHANGE_EVENT = "civiclens-name-change";
-
-const nameStore = {
-  subscribe(onChange: () => void) {
-    if (typeof window === "undefined") return () => {};
-    window.addEventListener("storage", onChange);
-    window.addEventListener(NAME_CHANGE_EVENT, onChange);
-    return () => {
-      window.removeEventListener("storage", onChange);
-      window.removeEventListener(NAME_CHANGE_EVENT, onChange);
-    };
-  },
-  getSnapshot(): string {
-    if (typeof window === "undefined") return DEFAULT_CITIZEN_NAME;
-    try {
-      return citizenDisplayName(window.localStorage.getItem(USER_NAME_KEY));
-    } catch {
-      /* Storage can be unavailable (private mode); the default name stands. */
-      return DEFAULT_CITIZEN_NAME;
-    }
-  },
-  getServerSnapshot(): string {
-    return DEFAULT_CITIZEN_NAME;
-  },
-  set(next: string) {
-    const value = citizenDisplayName(next);
-    try {
-      if (value === DEFAULT_CITIZEN_NAME) window.localStorage.removeItem(USER_NAME_KEY);
-      else window.localStorage.setItem(USER_NAME_KEY, value);
-    } catch {
-      /* Ignore quota/permission errors: the name still applies for this session. */
-    }
-    window.dispatchEvent(new Event(NAME_CHANGE_EVENT));
-  },
-};
-
-function useCitizenName() {
-  const name = useSyncExternalStore(
-    nameStore.subscribe,
-    nameStore.getSnapshot,
-    nameStore.getServerSnapshot,
-  );
-  const setName = useCallback((next: string) => nameStore.set(next), []);
-  return { name, setName };
-}
-
 function speechErrorMessage(code: string): string {
   switch (code) {
     case "not-allowed":
@@ -260,107 +190,8 @@ function AmbientCanvas() {
 
 /* ============================ top navigation =========================== */
 
-/* Self-declared identity: click the badge to rename. Persists to
-   localStorage so the receipt PDF carries the same name next visit. */
-function CitizenIdentity({
-  name,
-  onRename,
-}: {
-  name: string;
-  onRename: (value: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name);
-  /* Escape unmounts the field, which can still fire a blur; this keeps the
-     cancelled value from being written back to storage. */
-  const cancelledRef = useRef(false);
 
-  const beginEditing = () => {
-    cancelledRef.current = false;
-    setDraft(name);
-    setEditing(true);
-  };
-
-  const commit = () => {
-    if (cancelledRef.current) {
-      cancelledRef.current = false;
-      return;
-    }
-    onRename(draft);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          commit();
-        }}
-        className="hidden items-center gap-1 rounded-full bg-[#0c2f5c] py-1 pl-3 pr-1 ring-1 ring-[#5b9be0] lg:flex"
-      >
-        <label htmlFor="citizen-name" className="sr-only">
-          Your name
-        </label>
-        <input
-          id="citizen-name"
-          value={draft}
-          maxLength={48}
-          autoFocus
-          placeholder={DEFAULT_CITIZEN_NAME}
-          onFocus={(event) => event.currentTarget.select()}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              cancelledRef.current = true;
-              setEditing(false);
-            }
-          }}
-          className="w-40 rounded-full bg-transparent text-[11px] text-white outline-none placeholder:text-slate-400"
-        />
-        <button
-          type="submit"
-          aria-label="Save name"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1d63b8] text-white transition hover:bg-[#2569bd]"
-        >
-          <Check className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </form>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={beginEditing}
-      title="Click to change your name"
-      aria-label={`Name on this receipt: ${name}. Activate to change it.`}
-      className="hidden items-center gap-2 rounded-full bg-[#0c2f5c] py-1 pl-1 pr-2.5 text-left ring-1 ring-[#1b4b8a] transition hover:ring-[#5b9be0] lg:inline-flex"
-    >
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white">
-        {citizenInitials(name)}
-      </span>
-      <span className="min-w-0 leading-tight">
-        <span className="block max-w-[10rem] truncate text-[11px] font-semibold text-white">
-          {name}
-        </span>
-        <span className="block text-[10px] text-slate-300">{CITIZEN_ROLE}</span>
-      </span>
-      <Pencil className="h-3 w-3 shrink-0 text-slate-300" aria-hidden="true" />
-    </button>
-  );
-}
-
-function PortalNav({
-  citizenName,
-  onRename,
-  onOpenDashboard,
-}: {
-  citizenName: string;
-  onRename: (value: string) => void;
-  onOpenDashboard?: () => void;
-}) {
+function PortalNav() {
   return (
     <nav className="sticky top-0 z-50 border-b border-[#1b4b8a] bg-[#103b6e] text-white">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
@@ -384,7 +215,6 @@ function PortalNav({
           </span>
           <Link
             href={DASHBOARD_ROUTE}
-            onClick={onOpenDashboard}
             className="flex-1 rounded-full px-4 py-1.5 text-center text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white sm:flex-none"
           >
             Policymaker Dashboard
@@ -392,8 +222,8 @@ function PortalNav({
         </div>
 
         {/* Right cluster */}
-        <div className="order-2 ml-auto flex items-center gap-2 sm:order-3">
-          <span className="hidden items-center gap-1.5 rounded-full bg-[#0c2f5c] px-3 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a] md:inline-flex">
+        <div className="order-2 ml-auto flex flex-wrap items-center justify-end gap-2 sm:order-3">
+          <span className="hidden items-center gap-1.5 rounded-full bg-[#0c2f5c] px-3 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a] xl:inline-flex">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
             All systems operational
           </span>
@@ -415,7 +245,8 @@ function PortalNav({
             <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
           </button>
           <ThemeToggle />
-          <CitizenIdentity name={citizenName} onRename={onRename} />
+          <RoleSwitcher tone="navy" />
+          <UserIdentityBadge tone="navy" />
         </div>
       </div>
     </nav>
@@ -866,7 +697,7 @@ export default function CitizenGrievancePortalPage() {
     SERVER_HYDRATING,
   );
   const storedReports = useCivicReports();
-  const citizen = useCitizenName();
+  const { citizenName } = useAuth();
 
   const draftRef = useRef(draft);
   const transcriptBaseRef = useRef("");
@@ -1084,7 +915,7 @@ export default function CitizenGrievancePortalPage() {
   return (
     <div className="relative min-h-screen w-full bg-[#eef5fa] text-slate-800 dark:bg-[#0a1a2e] dark:text-slate-100">
       <AmbientCanvas />
-      <PortalNav citizenName={citizen.name} onRename={citizen.setName} />
+      <PortalNav />
 
       <Hero />
 
@@ -1110,7 +941,7 @@ export default function CitizenGrievancePortalPage() {
           {/* Receipt appears here after a successful submission */}
           {verdict && !isSubmitting ? (
             <div className="flex flex-col gap-3">
-              <ReceiptCard report={verdict} citizenName={citizen.name} />
+              <ReceiptCard report={verdict} citizenName={citizenName} />
               <Link
                 href={DASHBOARD_ROUTE}
                 className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-[#133e70] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a4d85]"

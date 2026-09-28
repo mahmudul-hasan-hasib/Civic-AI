@@ -55,7 +55,9 @@ import {
   wardLabel,
 } from "@/app/civic-shared";
 import type { CivicReport } from "@/app/civic-shared";
+import AuthorityGate from "@/components/AuthorityGate";
 import NavBar, { CITIZEN_ROUTE } from "@/components/NavBar";
+import { useAuth } from "@/context/AuthContext";
 import {
   CategoryBadge,
   CategoryGlyph,
@@ -111,6 +113,7 @@ export default function AuthorityCommandCenterPage() {
   const liveReports = useCivicReports();
   const telemetry = useCivicTelemetry();
   const { dispatched, toggleDispatch } = useDispatchedTickets();
+  const { isAdmin } = useAuth();
 
   /* Seeds are deterministic demo history; live filings are layered on top so
      the command center reflects the current citizen session. */
@@ -249,6 +252,12 @@ export default function AuthorityCommandCenterPage() {
         </p>
       </div>
     );
+  }
+
+  /* No 401/403 wall: a citizen (or a judge) gets a polite card with one-click
+     demo access instead of a dead end. */
+  if (!isAdmin) {
+    return <AuthorityGate />;
   }
 
   return (

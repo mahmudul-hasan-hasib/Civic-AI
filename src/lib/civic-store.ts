@@ -70,6 +70,16 @@ function parseArray<T>(raw: string | null, guard: (value: unknown) => value is T
   }
 }
 
+function parseValue<T>(raw: string | null, guard: (value: unknown) => value is T): T | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return guard(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function isReport(value: unknown): value is CivicReport {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<CivicReport>;
@@ -141,6 +151,26 @@ function createCachedReader<T>(key: string, guard: (value: unknown) => value is 
 const readReportsSnapshot = createCachedReader(REPORTS_STORAGE_KEY, isReport);
 const readDispatchedSnapshot = createCachedReader(DISPATCH_STORAGE_KEY, (v): v is string => typeof v === "string");
 
+/* Single-record counterpart to createCachedReader, with the same raw-string
+   cache. Without it the telemetry snapshot is a fresh object on every call,
+   which useSyncExternalStore reads as a perpetual change and loops on. */
+function createCachedValueReader<T>(key: string, guard: (value: unknown) => value is T) {
+  let cachedRaw: string | null = null;
+  let cachedValue: T | null = null;
+  let primed = false;
+
+  return (): T | null => {
+    const raw = readRaw(key) ?? memoryFallback[key] ?? null;
+    if (primed && raw === cachedRaw) return cachedValue;
+    cachedRaw = raw;
+    cachedValue = parseValue<T>(raw, guard);
+    primed = true;
+    return cachedValue;
+  };
+}
+
+const readTelemetrySnapshot = createCachedValueReader(TELEMETRY_STORAGE_KEY, isTelemetry);
+
 function writeArray(key: string, values: unknown[]): void {
   const payload = JSON.stringify(values);
   if (!writeRaw(key, payload)) {
@@ -157,17 +187,6 @@ export const subscribeToStore = subscribe;
 const serverReports = (): CivicReport[] => EMPTY_REPORTS;
 const serverDispatched = (): string[] => EMPTY_DISPATCHED;
 const serverTelemetry = (): CivicTelemetry | null => null;
-
-function readTelemetrySnapshot(): CivicTelemetry | null {
-  const raw = readRaw(TELEMETRY_STORAGE_KEY) ?? memoryFallback[TELEMETRY_STORAGE_KEY];
-  if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isTelemetry(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 /* ----------------------------- hooks ------------------------------ */
 

@@ -2,55 +2,20 @@
 
 /* Shared application header for both routes.
 
-   Renders the CivicLens brand, the DPI initiative chip, the Day/Night switch and
-   a persona-appropriate quick link to the other route. The active route is
-   derived from usePathname() so callers only declare their own persona. */
+   Renders the CivicLens brand, the DPI initiative chip, the Day/Night switch, the
+   role switcher and the identity badge. The active route is derived from
+   usePathname() so callers only declare their own persona. */
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import {
-  ChevronRight,
-  HardHat,
-  Landmark,
-  Users,
-} from "lucide-react";
+import { HardHat, Landmark } from "lucide-react";
 
+import { CITIZEN_ROUTE } from "@/context/AuthContext";
+import { RoleSwitcher, UserIdentityBadge } from "@/components/RoleControls";
 import ThemeToggle from "@/components/ThemeToggle";
 import { TricolorRule } from "@/components/civic-ui";
 
-export const CITIZEN_ROUTE = "/";
-export const AUTHORITY_ROUTE = "/dashboard";
-
-export function RouteLink({
-  href,
-  label,
-  Icon,
-  emphasis = false,
-}: {
-  href: string;
-  label: string;
-  Icon: typeof Users;
-  emphasis?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition sm:px-3 sm:text-xs ${
-        emphasis
-          ? "civic-cta border-transparent text-white shadow-sm hover:opacity-95"
-          : "border-civic-line bg-civic-soft text-civic-ink hover:border-civic-blue/50 hover:text-civic-blue"
-      }`}
-    >
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className="hidden sm:inline">{label}</span>
-      <span className="sm:hidden">
-        {emphasis ? "Authority" : "Citizen"}
-      </span>
-      <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
-    </Link>
-  );
-}
+export { AUTHORITY_ROUTE, CITIZEN_ROUTE } from "@/context/AuthContext";
 
 export default function NavBar({
   persona,
@@ -100,27 +65,12 @@ export default function NavBar({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <UserIdentityBadge tone="civic" />
           <ThemeToggle />
-          {/* Cross-route persona switch: authority officers get a back-link to
-              the citizen view, citizens get a link into the command center. */}
-          {isAuthority ? (
-            <Link
-              href={CITIZEN_ROUTE}
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-civic-line bg-civic-soft px-2.5 py-1.5 text-[11px] font-semibold text-civic-ink transition hover:border-civic-blue/50 hover:text-civic-blue sm:px-3 sm:text-xs"
-            >
-              <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Citizen Portal</span>
-              <span className="sm:hidden">Citizen</span>
-            </Link>
-          ) : (
-            <RouteLink
-              href={AUTHORITY_ROUTE}
-              label="Authority Portal Access"
-              Icon={HardHat}
-              emphasis
-            />
-          )}
+          {/* Single cross-persona affordance: flipping to Citizen on this route
+              returns the officer to the filing form automatically. */}
+          <RoleSwitcher tone="civic" />
           <span className="hidden items-center gap-1.5 rounded-full border border-slate-700/60 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 xl:inline-flex">
             <span aria-hidden="true">🇮🇳</span>
             DPI Citizen Redressal Initiative
