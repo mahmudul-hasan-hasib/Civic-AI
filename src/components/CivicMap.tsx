@@ -3,6 +3,7 @@
 import "leaflet/dist/leaflet.css";
 
 import L from "leaflet";
+import { useEffect, useRef } from "react";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { Layers, ShieldAlert, Users } from "lucide-react";
 
@@ -35,14 +36,29 @@ type CivicMapProps = {
 };
 
 export default function CivicMap({ reports, clusters }: CivicMapProps) {
+  const mapRef = useRef<L.Map | null>(null);
   const citizensImpacted = clusters.reduce(
     (total, cluster) => total + cluster.citizen_report_count,
     0,
   );
 
+  /* The analytics lane is display:none until the mobile switcher reveals it, and
+     Leaflet caches its size at init. Re-measure whenever the box changes so the
+     tiles never stay collapsed after a tab switch or window resize. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const container = map.getContainer();
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(container);
+    map.invalidateSize();
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="relative h-[450px] w-full overflow-hidden rounded-xl">
+    <div className="relative h-[320px] w-full overflow-hidden rounded-xl border border-civic-line sm:h-[400px] lg:h-[480px]">
       <MapContainer
+        ref={mapRef}
         center={DHAKA_CENTER}
         zoom={12}
         scrollWheelZoom
@@ -55,14 +71,14 @@ export default function CivicMap({ reports, clusters }: CivicMapProps) {
             <Popup>
               <div className="min-w-52 space-y-2 text-sm" data-testid="civic-map-popup">
                 <p className="flex items-baseline justify-between gap-3">
-                  <strong>{cluster.category}</strong>
-                  <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-red-500/30">
+                  <strong className="text-civic-blue">{cluster.category}</strong>
+                  <span className="shrink-0 rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-400 ring-1 ring-rose-500/30">
                     U{cluster.urgency_score} {urgencyLabel(cluster.urgency_score)}
                   </span>
                 </p>
 
                 {cluster.citizen_report_count > 1 ? (
-                  <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
+                  <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2 py-1.5 text-[11px] font-semibold text-amber-300">
                     <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     <span>
                       Super Incident · Reported by {cluster.citizen_report_count} citizens in the
@@ -72,9 +88,9 @@ export default function CivicMap({ reports, clusters }: CivicMapProps) {
                   </p>
                 ) : null}
 
-                <p className="text-xs leading-relaxed text-slate-600">{cluster.summary_en}</p>
+                <p className="text-xs leading-relaxed text-civic-muted">{cluster.summary_en}</p>
 
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-civic-muted/80">
                   {cluster.extracted_location} · {formatCoordinate(cluster.lat)},{" "}
                   {formatCoordinate(cluster.lng)}
                 </p>
@@ -85,12 +101,12 @@ export default function CivicMap({ reports, clusters }: CivicMapProps) {
       </MapContainer>
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[1100] flex flex-wrap items-start justify-between gap-2 p-3">
-        <div className="flex items-center gap-2 rounded-lg border border-slate-700/80 bg-slate-950/85 px-2.5 py-1.5 text-[11px] font-medium text-slate-200 backdrop-blur">
-          <Layers className="h-3.5 w-3.5 text-indigo-300" aria-hidden="true" />
+        <div className="flex items-center gap-2 rounded-lg border border-civic-line bg-slate-900/90 px-2.5 py-1.5 text-[11px] font-medium text-civic-ink shadow-lg shadow-black/50 backdrop-blur">
+          <Layers className="h-3.5 w-3.5 text-civic-blue" aria-hidden="true" />
           {clusters.length} geo-tagged incident{clusters.length === 1 ? "" : "s"} ·{" "}
           {reports.length} ticket{reports.length === 1 ? "" : "s"}
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-slate-950/85 px-2.5 py-1.5 text-[11px] font-medium text-amber-200 backdrop-blur">
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-slate-900/90 px-2.5 py-1.5 text-[11px] font-medium text-amber-300 shadow-lg shadow-black/50 backdrop-blur">
           <Users className="h-3.5 w-3.5" aria-hidden="true" />
           {citizensImpacted} citizens impacted
         </div>

@@ -1,26 +1,413 @@
 @import "tailwindcss";
 
+/* Day/Night theming. Day (light) is the default and the fallback everywhere.
+   Night is opt-in via a `dark` class on <html>, set before first paint by the
+   inline script in layout.tsx and persisted in localStorage. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* CivicLens institutional design tokens — Government of India DPI prototype.
+   Every colour is a variable so one class swap re-themes the whole platform. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --civic-page: #f8fafc; /* slate-50 */
+  --civic-surface: #ffffff;
+  --civic-surface-soft: #f1f5f9; /* slate-100 */
+  --civic-blue: #4f46e5; /* indigo-600 — primary AI accent */
+  --civic-navy: #7c3aed; /* violet-600 */
+  --civic-saffron: #f59e0b;
+  --civic-green: #10b981; /* emerald-500 */
+  --civic-critical: #e11d48; /* rose-600 */
+  --civic-warning: #d97706;
+  --civic-ink: #0f172a; /* slate-900 */
+  --civic-ink-soft: #64748b; /* slate-500 */
+  --civic-border: #e2e8f0; /* slate-200 */
+
+  --civic-glass-bg: rgba(255, 255, 255, 0.8);
+  --civic-glass-border: #e2e8f0;
+  --civic-panel-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --civic-cta-from: #4f46e5;
+  --civic-cta-mid: #6d28d9;
+  --civic-cta-to: #7c3aed;
+  --civic-glow: 0 0 15px rgba(99, 102, 241, 0.15);
+  --civic-glow-border: rgba(99, 102, 241, 0.3);
+  --civic-grid-line: #e6ebf3;
+  --civic-focus: #4f46e5;
+
+  --background: var(--civic-page);
+  --foreground: var(--civic-ink);
+}
+
+.dark {
+  --civic-page: #020617; /* slate-950 */
+  --civic-surface: #0f172a; /* slate-900 */
+  --civic-surface-soft: #1e293b; /* slate-800 */
+  --civic-blue: #818cf8; /* indigo-400 */
+  --civic-navy: #a78bfa; /* violet-400 */
+  --civic-saffron: #fbbf24;
+  --civic-green: #34d399;
+  --civic-critical: #fb7185;
+  --civic-warning: #fbbf24;
+  --civic-ink: #f1f5f9; /* slate-100 */
+  --civic-ink-soft: #94a3b8; /* slate-400 */
+  --civic-border: #1e293b; /* slate-800 */
+
+  --civic-glass-bg: rgba(15, 23, 42, 0.72);
+  --civic-glass-border: #1e293b;
+  --civic-panel-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --civic-cta-from: #4f46e5;
+  --civic-cta-mid: #6d28d9;
+  --civic-cta-to: #7c3aed;
+  --civic-glow: 0 0 15px rgba(99, 102, 241, 0.25);
+  --civic-glow-border: rgba(99, 102, 241, 0.3);
+  --civic-grid-line: #1e293b;
+  --civic-focus: #818cf8;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  --color-civic-page: var(--civic-page);
+  --color-civic-surface: var(--civic-surface);
+  --color-civic-soft: var(--civic-surface-soft);
+  --color-civic-blue: var(--civic-blue);
+  --color-civic-navy: var(--civic-navy);
+  --color-civic-saffron: var(--civic-saffron);
+  --color-civic-green: var(--civic-green);
+  --color-civic-critical: var(--civic-critical);
+  --color-civic-warning: var(--civic-warning);
+  --color-civic-ink: var(--civic-ink);
+  --color-civic-muted: var(--civic-ink-soft);
+  --color-civic-line: var(--civic-border);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--civic-page);
+  color: var(--civic-ink);
+  font-family: var(--font-geist-sans), "Segoe UI", Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background-color 220ms ease,
+    color 220ms ease;
+}
+
+/* Keyboard focus is always visible and never removed. */
+:focus-visible {
+  outline: 2px solid var(--civic-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------- surfaces */
+
+.civic-glass {
+  background: var(--civic-glass-bg);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+
+.civic-panel {
+  background: var(--civic-surface);
+  border: 1px solid var(--civic-border);
+  box-shadow: var(--civic-panel-shadow);
+}
+
+/* Soft AI ambient glow — reserved for live/active indicators and critical cards. */
+.civic-glow {
+  border-color: var(--civic-glow-border);
+  box-shadow: var(--civic-glow);
+}
+
+/* Muted bar tracks (budget/demand/urgency meters) stay legible in both modes. */
+.civic-track {
+  background: var(--civic-grid-line);
+}
+
+.civic-tricolor-rule {
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--civic-saffron) 0%,
+    var(--civic-saffron) 33.33%,
+    #ffffff 33.33%,
+    #ffffff 66.66%,
+    var(--civic-green) 66.66%,
+    var(--civic-green) 100%
+  );
+}
+
+/* ------------------------------------------------------------- CTA styling */
+
+.civic-cta {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    100deg,
+    var(--civic-cta-from) 0%,
+    var(--civic-cta-mid) 38%,
+    var(--civic-cta-to) 64%,
+    var(--civic-green) 132%
+  );
+  background-size: 240% 100%;
+  background-position: 0% 50%;
+  animation: civic-cta-pan 14s ease-in-out infinite alternate;
+}
+
+.civic-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.3) 48%,
+    transparent 76%
+  );
+  transform: translateX(-120%);
+  transition: transform 720ms ease;
+  pointer-events: none;
+}
+
+.civic-cta:hover:not(:disabled)::after,
+.civic-cta:focus-visible::after {
+  transform: translateX(120%);
+}
+
+@keyframes civic-cta-pan {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 100% 50%;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* -------------------------------------------------------------- animations */
+
+@keyframes civic-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+.civic-pulse-dot {
+  animation: civic-pulse-ring 2.6s ease-out infinite;
+}
+
+@keyframes civic-pulse-amber {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(251, 191, 36, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+}
+
+.civic-pulse-dot-amber {
+  animation: civic-pulse-amber 2.6s ease-out infinite;
+}
+
+@keyframes civic-pulse-rose {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(251, 113, 133, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 113, 133, 0);
+  }
+}
+
+.civic-pulse-dot-rose {
+  animation: civic-pulse-rose 2.6s ease-out infinite;
+}
+
+/* Active voice capture — pulsing rose ring for unmistakable affordance. */
+@keyframes civic-voice-ring {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(244, 63, 94, 0.55),
+      inset 0 0 0 1px rgba(244, 63, 94, 0.6);
+  }
+  70% {
+    box-shadow:
+      0 0 0 14px rgba(244, 63, 94, 0),
+      inset 0 0 0 1px rgba(244, 63, 94, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(244, 63, 94, 0),
+      inset 0 0 0 1px rgba(244, 63, 94, 0.2);
+  }
+}
+
+.civic-voice-ring {
+  animation: civic-voice-ring 1.5s ease-out infinite;
+}
+
+@keyframes civic-wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.civic-wave-bar {
+  transform-origin: center;
+  animation: civic-wave 1.05s ease-in-out infinite;
+}
+
+@keyframes civic-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.civic-rise {
+  animation: civic-rise 380ms ease-out both;
+}
+
+@keyframes civic-hazard-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(244, 63, 94, 0.06);
+  }
+}
+
+.civic-hazard-ring {
+  animation: civic-hazard-ring 4.5s ease-in-out infinite;
+}
+
+@keyframes civic-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.civic-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(59, 130, 246, 0.16),
+    transparent
+  );
+  animation: civic-sweep 1.8s ease-in-out infinite;
+}
+
+@keyframes civic-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.civic-grow {
+  transform-origin: left center;
+  animation: civic-grow 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* --------------------------------------------------------------- Leaflet */
+/* OpenStreetMap raster tiles stay unmodified; only the chrome around them
+   (popups, controls, attribution) is themed so text stays legible in both modes. */
+
+.leaflet-container {
+  font-family: var(--font-geist-sans), "Segoe UI", Arial, sans-serif;
+  background: var(--civic-grid-line);
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--civic-surface);
+  color: var(--civic-ink);
+  border-radius: 12px;
+  border: 1px solid var(--civic-border);
+  box-shadow: var(--civic-panel-shadow);
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+  line-height: 1.5;
+  color: var(--civic-ink);
+}
+
+.leaflet-popup-tip {
+  background: var(--civic-surface);
+  border: 1px solid var(--civic-border);
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  background: var(--civic-surface);
+  color: var(--civic-ink);
+  border-bottom-color: var(--civic-border);
+}
+
+.leaflet-control-attribution {
+  background: var(--civic-glass-bg) !important;
+  color: var(--civic-ink-soft);
+  font-size: 10px;
+}
+
+.leaflet-control-attribution a {
+  color: var(--civic-blue);
+}
+
+/* --------------------------------------------------- reduced motion guard */
+
+@media (prefers-reduced-motion: reduce) {
+  .civic-cta,
+  .civic-pulse-dot,
+  .civic-pulse-dot-amber,
+  .civic-pulse-dot-rose,
+  .civic-voice-ring,
+  .civic-wave-bar,
+  .civic-rise,
+  .civic-hazard-ring,
+  .civic-sweep::after,
+  .civic-grow {
+    animation: none !important;
+  }
+
+  .civic-cta::after {
+    display: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
