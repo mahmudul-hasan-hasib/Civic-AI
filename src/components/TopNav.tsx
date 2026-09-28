@@ -14,12 +14,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Bell, ChevronDown, Globe, Landmark } from "lucide-react";
+import { ChevronDown, Globe } from "lucide-react";
 
 import { AUTHORITY_ROUTE, CITIZEN_ROUTE } from "@/context/AuthContext";
 import type { Officer } from "@/context/AuthContext";
+import AshokaChakra from "@/components/AshokaChakra";
 import AuthorityAuthModal from "@/components/AuthorityAuthModal";
 import AuthorityProfile from "@/components/AuthorityProfile";
+import NotificationBell from "@/components/NotificationBell";
 import { RoleSwitcher, CitizenIdentityBadge } from "@/components/RoleControls";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -55,7 +57,7 @@ export default function TopNav({
           {/* Brand */}
           <Link href={CITIZEN_ROUTE} className="flex min-w-0 items-center gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25">
-              <Landmark className="h-5 w-5 text-white" aria-hidden="true" />
+              <AshokaChakra className="h-6 w-6 text-white" />
             </span>
             <span className="min-w-0">
               <span className="block text-base font-bold leading-tight tracking-tight">
@@ -107,17 +109,7 @@ export default function TopNav({
               EN
               <ChevronDown className="h-3 w-3" aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="relative hidden h-8 w-8 items-center justify-center rounded-full bg-[#0c2f5c] text-slate-200 ring-1 ring-[#1b4b8a] hover:text-white sm:inline-flex"
-            >
-              <Bell className="h-4 w-4" aria-hidden="true" />
-              <span
-                className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400"
-                aria-hidden="true"
-              />
-            </button>
+            <NotificationBell />
             <ThemeToggle />
             <RoleSwitcher />
             <CitizenIdentityBadge />

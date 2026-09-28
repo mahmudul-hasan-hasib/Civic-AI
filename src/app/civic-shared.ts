@@ -367,8 +367,8 @@ export function slaHours(score: number): number {
 
 export function slapolicyLabel(score: number): string {
   const leveled = clampUrgency(score);
-  if (leveled >= 5) return "Immediate Emergency Response (SLA: 2 Hours)";
-  if (leveled === 4) return "Priority Response (SLA: 12 - 24 Hours)";
+  if (leveled >= 5) return "Immediate Emergency Response (SLA: 2 - 4 Hours)";
+  if (leveled === 4) return "Priority Response (SLA: 24 Hours)";
   if (leveled === 3) return "Standard Operational Response (SLA: 48 Hours)";
   return "Routine Maintenance (SLA: 72 - 120 Hours)";
 }

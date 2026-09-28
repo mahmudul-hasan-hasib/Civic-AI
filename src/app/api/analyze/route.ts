@@ -11,10 +11,31 @@ type CascadeModel = {
 };
 
 const MODEL_CASCADE: readonly CascadeModel[] = [
-  { id: "gemini-3.8-flash", tier: "primary", supportsThinkingBudget: true, baseConfidence: 0.97 },
-  { id: "gemini-3.1-flash-lite", tier: "lite", supportsThinkingBudget: true, baseConfidence: 0.9 },
-  { id: "gemini-3.5-flash", tier: "deep", supportsThinkingBudget: true, baseConfidence: 0.95 },
+  { id: "gemini-2.5-flash", tier: "primary", supportsThinkingBudget: true, baseConfidence: 0.97 },
+  { id: "gemini-2.0-flash", tier: "lite", supportsThinkingBudget: false, baseConfidence: 0.9 },
 ] as const;
+
+/* Statuses that mean "try the next model", not "this input is bad": 429 is a
+   rate limit and 503 is capacity exhaustion, both of which resolve by moving
+   down the cascade rather than by surfacing an error to the citizen. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+function statusOf(error: unknown): number | null {
+  if (error instanceof ApiError && typeof error.status === "number") return error.status;
+  if (error && typeof error === "object") {
+    const record = error as { status?: unknown; code?: unknown; response?: { status?: unknown } };
+    if (typeof record.status === "number") return record.status;
+    if (typeof record.response?.status === "number") return record.response.status;
+  }
+  return null;
+}
+
+function isRetryable(error: unknown): boolean {
+  const status = statusOf(error);
+  if (status !== null) return RETRYABLE_STATUSES.has(status);
+  /* A timeout abort surfaces as an AbortError rather than an HTTP status. */
+  return error instanceof Error && (error.name === "AbortError" || /abort/i.test(error.message));
+}
 
 const HEURISTIC_ACTIVE_MODEL = "heuristic-fail-safe";
 const HEURISTIC_MIN_CONFIDENCE = 0.7;
@@ -72,34 +93,41 @@ const HARD_HAZARD_TERMS = [
 
 const HAZARD_COMBO_TERMS = ["তার", "বিদ্যুৎ", "ছিঁড়ে", "পানি", "पानी", "বিপদ"];
 
-const CRITICAL_TRIGGERS = [
+/* Urgency 5 is reserved for threats to life. isCriticalHazard() already owns the
+   electrical and gas cases; this band catches the physical hazards the regex
+   does not cover (collapse with victims, open manholes, accidents). */
+const LIFE_THREATENING_TRIGGERS = [
+  "gas leak",
+  "gas smell",
+  "open manhole",
+  "collapse",
+  "collapsed",
+  "crash",
+  "accident",
+  "injury",
+  "injured",
+  "trapped",
+  "ধস",
+  "ভেঙে",
+  "দুর্ঘটনা",
+];
+
+/* Urgency 4: major disruption that is serious but not immediately lethal. These
+   must never reach 5 on their own - "burst main flooding" is the canonical
+   case, and promoting it to an emergency dispatch overstates the risk. */
+const MAJOR_DISRUPTION_TRIGGERS = [
   "burst",
   "blocked",
   "blackout",
   "outage",
   "load shedding",
+  "flood",
+  "flooding",
   "লোডশেডিং",
   "ব্ল্যাকআউট",
   "ফেটে",
   "অবরুদ্ধ",
-  "danger",
-  "dangerous",
-  "flood",
-  "flooding",
-  "emergency",
-  "accidental",
-  "severe",
-  "collapse",
-  "crash",
-  "injury",
-  "ভেঙে",
-  "পানি",
-  "বিপদ",
-  "জরুরি",
   "বন্যা",
-  "ভয়াবহ",
-  "ধস",
-  "দুর্ঘটনা",
 ];
 
 const MODERATE_TRIGGERS = [
@@ -113,6 +141,10 @@ const MODERATE_TRIGGERS = [
   "issue",
   "problem",
   "streetlight",
+  "street light",
+  "unlit",
+  "no light",
+  "dark",
   "overflow",
   "garbage",
   "waste",
@@ -162,8 +194,29 @@ const CATEGORY_RULES: { category: string; keywords: string[] }[] = [
   },
   {
     category: "Electricity / Lighting",
-    keywords: ["power", "wire", "current", "shock", "outage", "বিদ্যুৎ", "তার", "করেন্ট", "কারেন্ট", "লোডশেডিং", "লাইট"],
+    keywords: [
+      "power",
+      "wire",
+      "current",
+      "shock",
+      "outage",
+      "streetlight",
+      "street light",
+      "street lamp",
+      "unlit",
+      "no light",
+      "lamp",
+      "light",
+      "dark",
+      "???????",
+      "???",
+      "??????",
+      "???????",
+      "????????",
+      "????",
+    ],
   },
+
 ];
 
 const DEPARTMENT_BY_CATEGORY: { match: string; department: string }[] = [
@@ -301,9 +354,8 @@ function inferCategory(haystack: string): string {
 
 function inferUrgency(haystack: string): number {
   if (isCriticalHazard(haystack)) return 5;
-  const criticalHits = CRITICAL_TRIGGERS.filter((trigger) => haystack.includes(trigger));
-  if (criticalHits.length >= 2) return 5;
-  if (criticalHits.length === 1) return 4;
+  if (LIFE_THREATENING_TRIGGERS.some((t) => haystack.includes(t))) return 5;
+  if (MAJOR_DISRUPTION_TRIGGERS.some((t) => haystack.includes(t))) return 4;
   const moderateHits = MODERATE_TRIGGERS.filter((trigger) => haystack.includes(trigger));
   if (moderateHits.length === 0) return 2;
   const routineHits = ROUTINE_TRIGGERS.filter((trigger) => haystack.includes(trigger));
@@ -327,12 +379,14 @@ function inferLocation(text: string): string {
   return unique.length > 0 ? unique.slice(0, 3).join(", ") : FALLBACK_LOCATION;
 }
 
+/* Timeframes mirror SLA_HOURS_BY_URGENCY in civic-shared so the dispatch text a
+   citizen reads in their receipt agrees with the policy label on the dashboard. */
 function compileAction(category: string, urgency: number, location: string): string {
   if (urgency >= 5) {
-    return `Immediate emergency dispatch for ${location}: deploy a ${category} rescue and repair unit and alert the ward control room within 2 hours.`;
+    return `Immediate emergency dispatch for ${location}: deploy a ${category} rescue and repair unit and alert the ward control room within 2 to 4 hours.`;
   }
   if (urgency === 4) {
-    return `Priority dispatch for ${location}: deploy a ${category} inspection and repair crew within 12 hours and cordon off the affected site.`;
+    return `Priority dispatch for ${location}: deploy a ${category} inspection and repair crew within 24 hours and cordon off the affected site.`;
   }
   if (urgency === 3) {
     return `Standard operational response for ${location}: schedule a ${category} inspection and repair crew within 48 hours.`;
@@ -349,7 +403,8 @@ function heuristicAnalyze(inputText: string, lat: number, lng: number, latencyMs
   const assigned_department = hazard ? HAZARD_DEPARTMENT : compileDepartment(category);
 
   const signals =
-    CRITICAL_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
+    LIFE_THREATENING_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
+    MAJOR_DISRUPTION_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
     MODERATE_TRIGGERS.filter((trigger) => haystack.includes(trigger)).length +
     HARD_HAZARD_TERMS.filter((trigger) => haystack.includes(trigger)).length +
     HAZARD_COMBO_TERMS.filter((trigger) => haystack.includes(trigger)).length +
@@ -585,8 +640,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         const reason = error instanceof ModelOutputError
           ? `invalid structured output (${error.message})`
           : describeError(error);
-        failures.push(`${target.id}: ${reason}`);
-        console.warn(`[CivicAnalyze] Model ${target.id} failed - ${reason}; trying next model.`);
+        const kind = isRetryable(error) ? "retryable" : "fatal";
+        failures.push(`${target.id} [${kind}]: ${reason}`);
+        console.warn(
+          `[CivicAnalyze] Model ${target.id} failed (${kind}) - ${reason}; trying next model.`,
+        );
       }
     }
 

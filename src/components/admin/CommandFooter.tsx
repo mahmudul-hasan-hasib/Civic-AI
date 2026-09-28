@@ -1,6 +1,6 @@
 "use client";
 
-import AshokaChakra from "@/components/admin/AshokaChakra";
+import AshokaChakra from "@/components/AshokaChakra";
 
 const LINKS = ["Privacy", "Accessibility", "Help & support", "Data policy"];
 

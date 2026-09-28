@@ -18,6 +18,7 @@
  * ========================================================================== */
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   useCallback,
   useEffect,
@@ -45,13 +46,26 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { DEFAULT_COORDS, formatCoordinate } from "@/app/civic-shared";
+import { CITY_BASELINE, DEFAULT_COORDS, formatCoordinate } from "@/app/civic-shared";
 import type { CivicReport } from "@/app/civic-shared";
 import AmbientCanvas from "@/components/AmbientCanvas";
 import ReceiptCard from "@/components/ReceiptCard";
 import TopNav from "@/components/TopNav";
 import { AUTHORITY_ROUTE, useAuth } from "@/context/AuthContext";
 import { submitGrievance, useCivicReports } from "@/lib/civic-store";
+
+/* Leaflet touches `window` at module scope, so the map must never be part of the
+   server render. Dynamic + ssr:false keeps the citizen page statically
+   prerenderable while still giving the location step a real basemap. */
+const CivicMap = dynamic(() => import("@/components/CivicMap"), {
+  ssr: false,
+  loading: () => (
+    <div
+      className="h-[150px] w-full rounded-xl border border-[#1b4578] bg-[#0c2a4e]"
+      aria-hidden="true"
+    />
+  ),
+});
 
 /* ----------------------------- speech types ---------------------------- */
 
@@ -223,8 +237,13 @@ function GrievanceCard({
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">
             Grievance Details
+            <span className="mx-1.5 text-[#5b9be0]" aria-hidden="true">
+              ·
+            </span>
+            <span className="normal-case tracking-normal">
+              Tell us what happened
+            </span>
           </p>
-          <h2 className="mt-1 text-xl font-bold text-white">Tell us what happened</h2>
         </div>
         <span className="rounded-full bg-[#0e315b] px-3 py-1 text-[11px] font-semibold text-slate-200 ring-1 ring-[#1b4578]">
           Step 1 of 1
@@ -362,40 +381,31 @@ function GrievanceCard({
         </div>
 
         {/* Detected location */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1b4578] bg-[#0e315b] p-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-[#1b4578]"
-              style={{
-                backgroundColor: "#0c2a4e",
-                backgroundImage:
-                  "linear-gradient(to right, rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.18) 1px, transparent 1px)",
-                backgroundSize: "10px 10px",
-              }}
-            >
-              <MapPin
-                className="m-auto mt-3.5 h-5 w-5 text-emerald-400"
+        <div className="rounded-xl border border-[#1b4578] bg-[#0e315b] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span
                 aria-hidden="true"
-              />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-300">
-                Detected Location
-              </p>
-              <p className="text-sm font-semibold text-white">
-                {locationState === "detected"
-                  ? "Location confirmed"
-                  : locationState === "locating"
-                    ? "Locating…"
-                    : "Location not yet confirmed"}
-              </p>
-              <p className="text-[11px] text-slate-300">
-                We only use location for routing
-              </p>
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[#0c2a4e] ring-1 ring-[#1b4578]"
+              >
+                <MapPin className="h-5 w-5 text-emerald-400" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-300">
+                  Detected Location
+                </p>
+                <p className="text-sm font-semibold text-white">
+                  {locationState === "detected"
+                    ? "Location confirmed"
+                    : locationState === "locating"
+                      ? "Locating…"
+                      : "Location not yet confirmed"}
+                </p>
+                <p className="tabular-nums text-[11px] text-slate-300">
+                  {formatCoordinate(coords.lat)}, {formatCoordinate(coords.lng)}
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col items-end gap-1">
             <button
               type="button"
               onClick={requestLocation}
@@ -409,10 +419,54 @@ function GrievanceCard({
               )}
               Use my location
             </button>
-            <span className="tabular-nums text-[10px] text-slate-400">
-              {formatCoordinate(coords.lat)}, {formatCoordinate(coords.lng)}
-            </span>
           </div>
+
+          {/* Mini-map preview: confirms the pin before the citizen commits, so a
+              mis-detected building cannot silently become the complaint's ward.
+              The live GPS fix and the issue pin are drawn separately - they are
+              the same point on a fresh detection, and diverge once the recorded
+              grievance location and the device position disagree. */}
+          <div className="mt-3">
+            <CivicMap
+              reports={[]}
+              clusters={[
+                {
+                  clusterId: "grievance-location-preview",
+                  category: "Issue location",
+                  lat: coords.lat,
+                  lng: coords.lng,
+                  summary_en: "Location that will be attached to this grievance",
+                  extracted_location:
+                    locationState === "detected"
+                      ? "Detected from your device"
+                      : "Approximate ward centre - grant location for an exact fix",
+                  urgency_score: 3,
+                  citizen_report_count: 1,
+                  member_ids: [],
+                  latest_at: "",
+                  actionable_recommendation: "",
+                }
+              ]}
+              userLocation={
+                locationState === "detected"
+                  ? {
+                      lat: coords.lat,
+                      lng: coords.lng,
+                      label: "Detected from your device",
+                    }
+                  : null
+              }
+              center={[coords.lat, coords.lng]}
+              zoom={14}
+              compact
+              className="h-[180px] w-full"
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            {locationState === "detected"
+              ? "Blue dot: your live position. Pin: the issue location attached to this grievance."
+              : "Showing an approximate ward centre. Use my location to pin your exact position."}
+          </p>
         </div>
 
         {submitError ? (
@@ -782,8 +836,8 @@ export default function CitizenGrievancePortalPage() {
      the session figures are live from this browser. */
   const snapshot = useMemo(
     () => ({
-      totalTickets: 2846,
-      critical: 184,
+      totalTickets: CITY_BASELINE.totalReports,
+      critical: CITY_BASELINE.highUrgency,
       sessionSubmitted: storedReports.length || filedCount,
       sessionTriaged: Math.max(0, storedReports.length - 1),
     }),

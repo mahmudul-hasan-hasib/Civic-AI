@@ -183,7 +183,7 @@ function buildReceiptPdf(doc: jsPDF, report: CivicReport, citizenName: string): 
   fieldRow(
     "SLA target time",
     report.urgency_score >= 5
-      ? "Emergency dispatch within 2 hours"
+      ? "Emergency dispatch within 2 to 4 hours"
       : `Resolution by ${stamp(deadline)}`,
   );
 

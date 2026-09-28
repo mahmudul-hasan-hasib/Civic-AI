@@ -160,9 +160,9 @@ export default function ReceiptCard({
           </p>
           {report.urgency_score >= 5 ? (
             <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-400">
-              Emergency Dispatch SLA: 2 Hours
+              Emergency Dispatch SLA: 2 - 4 Hours
               <span className="mt-0.5 block font-normal normal-case text-civic-muted">
-                Target resolution window: 2 - 4 hours
+                Dispatch committed within {report.sla_hours} hours
               </span>
             </p>
           ) : (

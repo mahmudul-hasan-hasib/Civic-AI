@@ -19,19 +19,19 @@ import {
 const CivicMap = dynamic(() => import("@/components/CivicMap"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[300px] items-center justify-center rounded-xl border border-[#1b4578] bg-[#0d2e55] sm:h-[380px] lg:h-[440px]">
+    <div className="flex h-[450px] items-center justify-center rounded-xl border border-[#1b4578] bg-[#0d2e55]">
       <p className="text-xs font-semibold text-slate-300">Loading geospatial layer…</p>
     </div>
   ),
 });
 
-type MapFilter = "all" | "critical" | "infrastructure" | "session";
+type MapFilter = "all" | "critical" | "infrastructure" | "resolved";
 
 const FILTERS: { id: MapFilter; label: string }[] = [
   { id: "all", label: "All reports" },
   { id: "critical", label: "Critical" },
   { id: "infrastructure", label: "Infrastructure gaps" },
-  { id: "session", label: "This session" },
+  { id: "resolved", label: "Resolved" },
 ];
 
 /* Demand categories that represent physical infrastructure failure rather than
@@ -41,22 +41,23 @@ const INFRASTRUCTURE = new Set(["Drainage", "Roads & Transport", "Electricity"])
 export default function GeospatialPanel({
   clusters,
   reports,
-  sessionReportIds,
+  resolved,
 }: {
   clusters: SuperIncident[];
   reports: CivicReport[];
-  sessionReportIds: Set<string>;
+  /** Ticket ids an officer has marked resolved; drives the "Resolved" filter. */
+  resolved: Set<string>;
 }) {
   const [filter, setFilter] = useState<MapFilter>("all");
 
   const visible = useMemo(() => {
     if (filter === "all") return clusters;
-    if (filter === "critical") return clusters.filter((c) => c.urgency_score >= 8);
+    if (filter === "critical") return clusters.filter((c) => c.urgency_score >= 5);
     if (filter === "infrastructure") {
       return clusters.filter((c) => INFRASTRUCTURE.has(c.category));
     }
-    return clusters.filter((c) => c.member_ids.some((id) => sessionReportIds.has(id)));
-  }, [clusters, filter, sessionReportIds]);
+    return clusters.filter((c) => c.member_ids.some((id) => resolved.has(id)));
+  }, [clusters, filter, resolved]);
 
   /* The densest, most urgent cluster is the one an officer should look at
      first, so it is called out on the map rather than left to be found. */
@@ -107,7 +108,7 @@ export default function GeospatialPanel({
           reports={visibleReports}
           clusters={visible}
           variant="dark"
-          className="h-[300px] sm:h-[380px] lg:h-[440px]"
+          className="h-[450px] w-full"
         />
 
         {/* Highest-concentration callout, anchored over the map. */}

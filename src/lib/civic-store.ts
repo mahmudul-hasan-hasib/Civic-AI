@@ -29,6 +29,7 @@ import type { CivicReport } from "@/app/civic-shared";
 export const REPORTS_STORAGE_KEY = "civiclens-reports";
 export const TELEMETRY_STORAGE_KEY = "civiclens-telemetry";
 export const DISPATCH_STORAGE_KEY = "civiclens-dispatched";
+export const RESOLVED_STORAGE_KEY = "civiclens-resolved";
 
 export type CivicTelemetry = {
   mode: "primary" | "resilient";
@@ -39,6 +40,7 @@ export type CivicTelemetry = {
 
 const EMPTY_REPORTS: CivicReport[] = [];
 const EMPTY_DISPATCHED: string[] = [];
+const EMPTY_RESOLVED: string[] = [];
 
 function readRaw(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -150,6 +152,7 @@ function createCachedReader<T>(key: string, guard: (value: unknown) => value is 
 
 const readReportsSnapshot = createCachedReader(REPORTS_STORAGE_KEY, isReport);
 const readDispatchedSnapshot = createCachedReader(DISPATCH_STORAGE_KEY, (v): v is string => typeof v === "string");
+const readResolvedSnapshot = createCachedReader(RESOLVED_STORAGE_KEY, (v): v is string => typeof v === "string");
 
 /* Single-record counterpart to createCachedReader, with the same raw-string
    cache. Without it the telemetry snapshot is a fresh object on every call,
@@ -181,6 +184,7 @@ function writeArray(key: string, values: unknown[]): void {
 
 export const readReports = readReportsSnapshot;
 export const readDispatched = readDispatchedSnapshot;
+export const readResolved = readResolvedSnapshot;
 export const subscribeToStore = subscribe;
 
 /* Snapshot readers for the server render must be stable references. */
@@ -226,6 +230,30 @@ export function useDispatchedTickets(): {
   }, []);
 
   return { dispatched: new Set(ids), toggleDispatch, clearDispatch };
+}
+
+/* Resolution is officer-authored, not inferred from age: a ticket only becomes
+   "Resolved" when someone marks it, so the dashboard filter always reflects a
+   real workflow decision rather than a guess. */
+export function useResolvedTickets(): {
+  resolved: Set<string>;
+  toggleResolved: (id: string) => void;
+} {
+  const ids = useSyncExternalStore(
+    subscribe,
+    readResolvedSnapshot,
+    () => EMPTY_RESOLVED,
+  );
+
+  const toggleResolved = useCallback((id: string) => {
+    const current = readResolvedSnapshot();
+    const next = current.includes(id)
+      ? current.filter((value) => value !== id)
+      : [...current, id];
+    writeArray(RESOLVED_STORAGE_KEY, next);
+  }, []);
+
+  return { resolved: new Set(ids), toggleResolved };
 }
 
 /* --------------------------- mutations ---------------------------- */

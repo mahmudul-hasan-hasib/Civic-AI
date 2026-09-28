@@ -49,8 +49,8 @@ import {
   buildSeedReports,
   mergeReports,
   useCivicReports,
-  useCivicTelemetry,
   useDispatchedTickets,
+  useResolvedTickets,
 } from "@/lib/civic-store";
 import { downloadBriefingPdf } from "@/lib/briefing-pdf";
 import type { BriefingInput } from "@/lib/briefing-pdf";
@@ -90,16 +90,28 @@ function gapSeries(reports: CivicReport[]): number[] {
   });
 }
 
+const TIMEFRAMES = [
+  { id: "24h", label: "Last 24h", hours: 24 },
+  { id: "7d", label: "Past 7d", hours: 24 * 7 },
+  { id: "30d", label: "Past 30d", hours: 24 * 30 },
+] as const;
+
+type TimeframeId = (typeof TIMEFRAMES)[number]["id"];
+
+/** Metric cards double as filters: the card you select scopes the whole page. */
+type MetricFilter = "all" | "reports" | "urgent" | "category" | "gap";
+
 export default function WardCommandCenterPage() {
   const [exporting, setExporting] = useState(false);
-  const [reviewNote, setReviewNote] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [scopeToWard, setScopeToWard] = useState(false);
+  const [timeframe, setTimeframe] = useState<TimeframeId>("30d");
+  const [metricFilter, setMetricFilter] = useState<MetricFilter>("all");
 
   const { isAdmin, officer } = useAuth();
   const liveReports = useCivicReports();
-  const telemetry = useCivicTelemetry();
   const { dispatched, toggleDispatch } = useDispatchedTickets();
+  const { resolved, toggleResolved } = useResolvedTickets();
 
   const mounted = useSyncExternalStore(
     NO_SUBSCRIBE,
@@ -116,29 +128,82 @@ export default function WardCommandCenterPage() {
     () => mergeReports(liveReports, buildSeedReports()),
     [liveReports],
   );
-  const clusters = useMemo(() => clusterReports(reports), [reports]);
-  const sessionReportIds = useMemo(
-    () => new Set(liveReports.map((report) => report.id)),
-    [liveReports],
-  );
 
   const jurisdiction = wardCodeOf(officer?.ward);
   const activeWard = scopeToWard && jurisdiction ? jurisdiction : null;
+
+  /* Timeframe first: it bounds the working set before ward scope, filters, and
+     the queue all read from it, so every panel agrees on the same window. */
+  const windowedReports = useMemo(() => {
+    const hours = TIMEFRAMES.find((item) => item.id === timeframe)?.hours ?? 720;
+    const cutoff = now - hours * 3_600_000;
+    return reports.filter((report) => {
+      const at = new Date(report.created_at).getTime();
+      return Number.isFinite(at) ? at >= cutoff : true;
+    });
+  }, [reports, timeframe, now]);
+
   const scopedReports = useMemo(
-    () => (activeWard ? reports.filter((report) => report.ward === activeWard) : reports),
-    [reports, activeWard],
-  );
-  const scopedClusters = useMemo(
     () =>
       activeWard
-        ? clusters.filter((cluster) =>
-            cluster.member_ids.some((id) => scopedReports.some((r) => r.id === id)),
-          )
-        : clusters,
-    [clusters, activeWard, scopedReports],
+        ? windowedReports.filter((report) => report.ward === activeWard)
+        : windowedReports,
+    [windowedReports, activeWard],
   );
 
+  /* Selecting a metric narrows the visible set; "all" restores everything in
+     the current window. Urgency and gap cards are orthogonal to category, so a
+     category selection replaces rather than intersects them. */
+  const topCategoryName = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const report of scopedReports) {
+      counts.set(report.category, (counts.get(report.category) ?? 0) + 1);
+    }
+    let best: string | null = null;
+    let bestCount = -1;
+    for (const [category, count] of counts) {
+      if (count > bestCount) {
+        best = category;
+        bestCount = count;
+      }
+    }
+    return best;
+  }, [scopedReports]);
+
+  const filteredReports = useMemo(() => {
+    if (metricFilter === "all") return scopedReports;
+    if (metricFilter === "reports") return scopedReports;
+    if (metricFilter === "urgent") {
+      return scopedReports.filter((report) => report.urgency_score >= 5);
+    }
+    if (metricFilter === "category") {
+      return topCategoryName
+        ? scopedReports.filter((report) => report.category === topCategoryName)
+        : scopedReports;
+    }
+    /* "gap" surfaces the categories the demand analysis flags as under-funded. */
+    const gapSet = new Set(
+      demandAnalysis(windowedReports, activeWard)
+        .allocations.filter((row) => row.deficitPct > 0)
+        .map((row) => row.category),
+    );
+    return gapSet.size === 0
+      ? scopedReports
+      : scopedReports.filter((report) => gapSet.has(report.category));
+  }, [scopedReports, metricFilter, topCategoryName, windowedReports, activeWard]);
+
+  const scopedClusters = useMemo(() => clusterReports(filteredReports), [filteredReports]);
+
   const demand = useMemo(() => demandAnalysis(scopedReports, activeWard), [scopedReports, activeWard]);
+
+  /* The card reads as "share of demand", so measure against the current set. */
+  const topCategoryShare = useMemo(() => {
+    if (!topCategoryName || filteredReports.length === 0) return 0;
+    const matches = filteredReports.filter(
+      (report) => report.category === topCategoryName,
+    ).length;
+    return (matches / filteredReports.length) * 100;
+  }, [topCategoryName, filteredReports]);
 
   /* Read the previously recorded index during render (safe once mounted) and
      persist the current one in an effect, which only touches storage. */
@@ -206,23 +271,36 @@ export default function WardCommandCenterPage() {
         .slice(0, 6)
         .map((report) => {
           const isDispatched = dispatched.has(report.id);
+          const isResolved = resolved.has(report.id);
           return {
             id: report.tracking_id,
+            reportId: report.id,
             category: report.category,
             grievance: trim(report.summary_en, 72),
+            fullGrievance: report.summary_en,
             ward: report.ward,
             urgency: report.urgency_score,
             action: trim(report.actionable_recommendation, 40),
+            fullAction: report.actionable_recommendation,
+            slaHours: report.sla_hours,
+            createdAt: report.created_at,
+            originalText: report.input_text,
+            location: report.extracted_location,
+            department: report.department,
+            isFallback: report.is_fallback,
+            latencyMs: report.latency_ms,
+            confidence: report.confidence,
             status: statusFor(report, isDispatched, now),
             dispatched: isDispatched,
+            resolved: isResolved,
           };
         }),
-    [scopedReports, dispatched, now],
+    [scopedReports, dispatched, resolved, now],
   );
 
   /* Any citizen filed in this browser sits above the city-wide baseline. */
   const sessionUrgent = useMemo(
-    () => liveReports.filter((report) => report.urgency_score >= 8).length,
+    () => liveReports.filter((report) => report.urgency_score >= 5).length,
     [liveReports],
   );
 
@@ -315,8 +393,6 @@ export default function WardCommandCenterPage() {
 
   if (!isAdmin) return <AuthorityGate />;
 
-  const topAllocation = demand.allocations[0];
-
   return (
     <div className="relative min-h-screen w-full bg-[#eef5fa] text-slate-800 dark:bg-[#0a1a2e] dark:text-slate-100">
       <AmbientCanvas />
@@ -364,6 +440,22 @@ export default function WardCommandCenterPage() {
                 </button>
               ) : null}
 
+              <label className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9dced] bg-white/70 px-2.5 py-1.5 text-[11px] font-semibold text-[#0f294a] dark:border-[#1b4578] dark:bg-[#0c2135] dark:text-slate-200">
+                <span className="sr-only sm:not-sr-only">Timeframe</span>
+                <select
+                  value={timeframe}
+                  onChange={(event) => setTimeframe(event.target.value as TimeframeId)}
+                  data-testid="timeframe-select"
+                  className="cursor-pointer bg-transparent text-[11px] font-semibold outline-none"
+                >
+                  {TIMEFRAMES.map((item) => (
+                    <option key={item.id} value={item.id} className="text-slate-800">
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <button
                 type="button"
                 onClick={exportBriefing}
@@ -384,20 +476,42 @@ export default function WardCommandCenterPage() {
           <MetricCards
             sessionReports={liveReports.length}
             sessionUrgent={sessionUrgent}
-            topCategory={topAllocation?.category ?? "-"}
-            topCategoryShare={topAllocation?.demandPct ?? 0}
+            topCategory={topCategoryName ?? "-"}
+            topCategoryShare={topCategoryShare}
             gapIndex={demand.gapIndex}
             gapDelta={gapDelta}
             gapSeries={gapSeries(reports)}
+            active={metricFilter}
+            onSelect={(next) =>
+              setMetricFilter((prev) => (prev === next ? "all" : next))
+            }
           />
+
+          {metricFilter !== "all" ? (
+            <p
+              role="status"
+              className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#c9dced] bg-white/70 px-3 py-2 text-[11px] font-semibold text-[#0f294a] dark:border-[#1b4578] dark:bg-[#0c2135] dark:text-slate-200"
+            >
+              <span>
+                Filtered to {filteredReports.length} of {scopedReports.length} tickets
+              </span>
+              <button
+                type="button"
+                onClick={() => setMetricFilter("all")}
+                className="rounded-md px-1.5 py-0.5 text-[#1d63b8] underline underline-offset-2 hover:text-[#103b6e] dark:text-sky-300"
+              >
+                Clear filter
+              </button>
+            </p>
+          ) : null}
         </header>
 
         {/* --------------------- heatmap + priority queue -------------------- */}
         <section className="my-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
           <GeospatialPanel
             clusters={scopedClusters}
-            reports={scopedReports}
-            sessionReportIds={sessionReportIds}
+            reports={filteredReports}
+            resolved={resolved}
           />
           <PriorityQueue
             items={queue}
@@ -407,29 +521,13 @@ export default function WardCommandCenterPage() {
         </section>
 
         {/* ------------------------------ policy ----------------------------- */}
-        <PolicyAnalytics
-          allocations={demand.allocations}
-          telemetry={telemetry}
-          onReview={() =>
-            setReviewNote(
-              `Reallocation of ${formatINR(
-                reallocationFor(topAllocation?.deficitPct ?? 0),
-              )} raised for ${topAllocation?.category ?? "the ward"}.`,
-            )
-          }
-        />
-
-        {reviewNote ? (
-          <p
-            role="status"
-            className="-mt-3 mb-6 rounded-lg border border-[#1e4d88] bg-[#133e70] px-4 py-2.5 text-xs font-semibold text-white"
-          >
-            {reviewNote}
-          </p>
-        ) : null}
+        <PolicyAnalytics allocations={demand.allocations} />
 
         {/* --------------------------- case ledger --------------------------- */}
-        <RecentTickets rows={tickets} />
+        <RecentTickets
+          rows={tickets}
+          onToggleResolved={(reportId) => toggleResolved(reportId)}
+        />
 
         {officer ? (
           <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">

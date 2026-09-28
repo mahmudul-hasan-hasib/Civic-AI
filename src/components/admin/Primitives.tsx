@@ -84,10 +84,12 @@ const TIER_STYLE: Record<UrgencyTier, string> = {
   Low: "border-emerald-400/60 bg-emerald-500/15 text-emerald-100",
 };
 
+/* The whole platform scores urgency 1-5 (see clampUrgency in civic-shared), so
+   the bands are 5/4/3 rather than the 8/6/4 an earlier 0-10 draft assumed. */
 export function tierFor(score: number): UrgencyTier {
-  if (score >= 8) return "Critical";
-  if (score >= 6) return "High";
-  if (score >= 4) return "Medium";
+  if (score >= 5) return "Critical";
+  if (score >= 4) return "High";
+  if (score >= 3) return "Medium";
   return "Low";
 }
 
