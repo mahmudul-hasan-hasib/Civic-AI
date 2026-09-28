@@ -8,6 +8,8 @@ import { formatCoordinate, slapolicyLabel, urgencyLabel, wardLabel } from "@/app
 import type { CivicReport } from "@/app/civic-shared";
 import type { jsPDF } from "jspdf";
 
+import { pdfSafe } from "@/lib/pdf-text";
+
 type Rgb = [number, number, number];
 
 /* A4 portrait in points, matching jsPDF's own page geometry. */
@@ -25,21 +27,6 @@ const HAIRLINE: Rgb = [203, 213, 225];
 const SOFT: Rgb = [241, 245, 249];
 const EMERALD: Rgb = [4, 120, 87];
 const AMBER: Rgb = [180, 83, 9];
-
-/* The built-in fonts are WinAnsi-encoded, so Indic scripts (Bengali, Hindi,
-   Tamil, Telugu) would render as missing-glyph boxes. Fold the typography we
-   do use into ASCII, then drop whatever the font cannot represent. */
-function pdfSafe(value: string): string {
-  return value
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
-    .replace(/[\u2013\u2014]/g, "-")
-    .replace(/[\u00b7\u2022]/g, "-")
-    .replace(/\u2026/g, "...")
-    .replace(/[^\x20-\x7e\xa0-\xff]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function buildReceiptPdf(doc: jsPDF, report: CivicReport, citizenName: string): void {
   const issuedAt = new Date(report.created_at);

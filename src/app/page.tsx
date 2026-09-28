@@ -29,8 +29,6 @@ import {
 import type { FormEvent } from "react";
 import {
   Activity,
-  Bell,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   Crosshair,
@@ -49,13 +47,11 @@ import {
 
 import { DEFAULT_COORDS, formatCoordinate } from "@/app/civic-shared";
 import type { CivicReport } from "@/app/civic-shared";
+import AmbientCanvas from "@/components/AmbientCanvas";
 import ReceiptCard from "@/components/ReceiptCard";
-import { RoleSwitcher, UserIdentityBadge } from "@/components/RoleControls";
-import ThemeToggle from "@/components/ThemeToggle";
-import { useAuth } from "@/context/AuthContext";
+import TopNav from "@/components/TopNav";
+import { AUTHORITY_ROUTE, useAuth } from "@/context/AuthContext";
 import { submitGrievance, useCivicReports } from "@/lib/civic-store";
-
-const DASHBOARD_ROUTE = "/dashboard";
 
 /* ----------------------------- speech types ---------------------------- */
 
@@ -145,113 +141,12 @@ function speechErrorMessage(code: string): string {
 
 /* ===================== ambient background decorations =================== */
 
-function AmbientCanvas() {
-  return (
-    <>
-      {/* Architectural vector grid */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-0"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, rgba(148, 163, 184, 0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.15) 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-      {/* Topographic contour rings, right side */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed right-[-18rem] top-[-8rem] z-0 hidden h-[46rem] w-[46rem] lg:block"
-      >
-        {[46, 38, 30, 22, 14].map((rem) => (
-          <div
-            key={rem}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/20"
-            style={{ height: `${rem}rem`, width: `${rem}rem` }}
-          />
-        ))}
-      </div>
-      {/* Diagonal tricolor ribbon, bottom-right */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed bottom-0 right-0 z-0 h-44 w-72 overflow-hidden"
-      >
-        <div className="absolute -bottom-24 -right-16 h-80 w-80 rotate-[-45deg] opacity-90">
-          <div className="grid h-full w-full grid-rows-3">
-            <div className="bg-[#f59e0b]" />
-            <div className="bg-white" />
-            <div className="bg-[#10b981]" />
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
+/* The canvas and the sticky header are shared with /dashboard, so the two
+   routes keep one implementation of each. */
 
 /* ============================ top navigation =========================== */
 
-
-function PortalNav() {
-  return (
-    <nav className="sticky top-0 z-50 border-b border-[#1b4b8a] bg-[#103b6e] text-white">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        {/* Brand */}
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25">
-            <Landmark className="h-5 w-5 text-white" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-base font-bold leading-tight tracking-tight">CivicLens</p>
-            <p className="truncate text-[11px] leading-tight text-slate-300">
-              AI Civic Intelligence Platform
-            </p>
-          </div>
-        </div>
-
-        {/* Center tab group */}
-        <div className="order-3 flex w-full items-center rounded-full bg-[#0c2f5c] p-1 ring-1 ring-[#1b4b8a] sm:order-2 sm:ml-4 sm:w-auto">
-          <span className="flex-1 rounded-full bg-white/15 px-4 py-1.5 text-center text-xs font-semibold text-white sm:flex-none">
-            Citizen Portal
-          </span>
-          <Link
-            href={DASHBOARD_ROUTE}
-            className="flex-1 rounded-full px-4 py-1.5 text-center text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white sm:flex-none"
-          >
-            Policymaker Dashboard
-          </Link>
-        </div>
-
-        {/* Right cluster */}
-        <div className="order-2 ml-auto flex flex-wrap items-center justify-end gap-2 sm:order-3">
-          <span className="hidden items-center gap-1.5 rounded-full bg-[#0c2f5c] px-3 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a] xl:inline-flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
-            All systems operational
-          </span>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-full bg-[#0c2f5c] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 ring-1 ring-[#1b4b8a]"
-            aria-label="Interface language: English"
-          >
-            <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-            EN
-            <ChevronDown className="h-3 w-3" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="relative hidden h-8 w-8 items-center justify-center rounded-full bg-[#0c2f5c] text-slate-200 ring-1 ring-[#1b4b8a] hover:text-white sm:inline-flex"
-          >
-            <Bell className="h-4 w-4" aria-hidden="true" />
-            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
-          </button>
-          <ThemeToggle />
-          <RoleSwitcher tone="navy" />
-          <UserIdentityBadge tone="navy" />
-        </div>
-      </div>
-    </nav>
-  );
-}
+/* PortalNav now lives in the shared TopNav component used by /dashboard. */
 
 /* ================================ hero ================================= */
 
@@ -915,7 +810,7 @@ export default function CitizenGrievancePortalPage() {
   return (
     <div className="relative min-h-screen w-full bg-[#eef5fa] text-slate-800 dark:bg-[#0a1a2e] dark:text-slate-100">
       <AmbientCanvas />
-      <PortalNav />
+      <TopNav />
 
       <Hero />
 
@@ -943,7 +838,7 @@ export default function CitizenGrievancePortalPage() {
             <div className="flex flex-col gap-3">
               <ReceiptCard report={verdict} citizenName={citizenName} />
               <Link
-                href={DASHBOARD_ROUTE}
+                href={AUTHORITY_ROUTE}
                 className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-[#133e70] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a4d85]"
               >
                 View on the Ward Command Center

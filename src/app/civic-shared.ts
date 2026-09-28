@@ -169,6 +169,16 @@ export const BASE_BUDGET_ALLOCATION: Record<string, number> = {
   Electricity: 10,
 };
 
+/* City-wide institutional totals for the whole municipal network, quoted on
+   both the citizen and the command-center dashboards. Geo-tagged telemetry
+   covers the ten wards in WARD_GRID, which is a subset of these. Anything a
+   citizen files in this session is added on top of the baseline at runtime. */
+export const CITY_BASELINE = {
+  totalReports: 2846,
+  highUrgency: 184,
+  monitoredWards: 22,
+} as const;
+
 const WARD_DEFS: { ward: string; label: string; lat: number; lng: number }[] = [
   { ward: "Ward 01", label: "Ward 01 · Mirpur", lat: 23.806, lng: 90.367 },
   { ward: "Ward 02", label: "Ward 02 · Kafrul", lat: 23.793, lng: 90.386 },
@@ -385,6 +395,27 @@ export function referenceHash(trackingId: string, createdAt: string): string {
 
 export function formatCurrency(amount: number): string {
   return `$${Math.round(amount / 1000)}k`;
+}
+
+/* Indian municipal budgets are quoted in crore and lakh, so the command center
+   formats its reallocation recommendations the way a civic office would. */
+export const WARD_REVENUE_POOL = 5_00_00_000;
+
+export function formatINR(amount: number): string {
+  const value = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (value >= 1_00_00_000) {
+    return `${sign}₹${(value / 1_00_00_000).toFixed(2).replace(/\.?0+$/, "")} Cr`;
+  }
+  if (value >= 1_00_000) {
+    return `${sign}₹${(value / 1_00_000).toFixed(2).replace(/\.?0+$/, "")} L`;
+  }
+  return `${sign}₹${Math.round(value).toLocaleString("en-IN")}`;
+}
+
+/* How much of the ward's annual pool a demand/budget deficit implies. */
+export function reallocationFor(deficitPct: number): number {
+  return (deficitPct / 100) * WARD_REVENUE_POOL;
 }
 
 export function budgetShiftAmount(deficitPct: number): number {
