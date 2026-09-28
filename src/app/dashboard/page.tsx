@@ -35,6 +35,7 @@ import AmbientCanvas from "@/components/AmbientCanvas";
 import AuthorityGate from "@/components/AuthorityGate";
 import CommandFooter from "@/components/admin/CommandFooter";
 import GeospatialPanel from "@/components/admin/GeospatialPanel";
+import type { HeatTimeframe } from "@/components/admin/GeospatialPanel";
 import MetricCards from "@/components/admin/MetricCards";
 import PolicyAnalytics from "@/components/admin/PolicyAnalytics";
 import PriorityQueue from "@/components/admin/PriorityQueue";
@@ -96,7 +97,9 @@ const TIMEFRAMES = [
   { id: "30d", label: "Past 30d", hours: 24 * 30 },
 ] as const;
 
-type TimeframeId = (typeof TIMEFRAMES)[number]["id"];
+/* One timeframe source of truth, shared by the header select and the heatmap
+   dropdown, so the two controls can never disagree. */
+type TimeframeId = HeatTimeframe;
 
 /** Metric cards double as filters: the card you select scopes the whole page. */
 type MetricFilter = "all" | "reports" | "urgent" | "category" | "gap";
@@ -510,8 +513,8 @@ export default function WardCommandCenterPage() {
         <section className="my-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
           <GeospatialPanel
             clusters={scopedClusters}
-            reports={filteredReports}
-            resolved={resolved}
+            timeframe={timeframe}
+            onTimeframeChange={(next) => setTimeframe(next)}
           />
           <PriorityQueue
             items={queue}

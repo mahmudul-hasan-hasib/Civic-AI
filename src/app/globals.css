@@ -384,6 +384,59 @@ body {
   color: var(--civic-blue);
 }
 
+/* --- Leaflet heat-ball markers --------------------------------------------
+   The marker bodies are raw HTML injected by Leaflet, outside the React tree,
+   so their animation is driven from here. That also means
+   `prefers-reduced-motion` can actually reach it, which an inline
+   `animation:` declaration could never be talked out of. */
+.custom-heat-ball {
+  /* Leaflet styles .leaflet-div-icon as a white box with a border, which would
+     sit behind the ball as an opaque square. */
+  background: transparent !important;
+  border: 0 !important;
+}
+
+@keyframes civic-heat-ping {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.civic-heat-ring {
+  transform-origin: 50% 50%;
+  animation: civic-heat-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes civic-heat-blink {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.civic-heat-dot {
+  animation: civic-heat-blink 1.8s ease-in-out infinite;
+}
+
+/* Dims the OSM raster tiles for the navy command-centre variant, so the app can
+   keep a dark basemap without depending on a keyed third-party dark tile
+   service, which would render a black "API KEY REQUIRED" tile without a token. */
+.civic-tiles-dark {
+  filter: invert(1) hue-rotate(190deg) brightness(0.82) contrast(0.92) saturate(0.75);
+}
+
 /* --------------------------------------------------- reduced motion guard */
 
 @media (prefers-reduced-motion: reduce) {
@@ -396,7 +449,9 @@ body {
   .civic-rise,
   .civic-hazard-ring,
   .civic-sweep::after,
-  .civic-grow {
+  .civic-grow,
+  .civic-heat-ring,
+  .civic-heat-dot {
     animation: none !important;
   }
 

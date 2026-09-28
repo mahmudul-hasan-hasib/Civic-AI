@@ -18,31 +18,64 @@ type IconDefaultWithUrl = typeof L.Icon.Default.prototype & { _getIconUrl?: unkn
 
 delete (L.Icon.Default.prototype as IconDefaultWithUrl)._getIconUrl;
 
+/* Leaflet resolves its default marker images from its own package CDN. Inlining
+   them as data URIs leaves this component with exactly one network
+   dependency, the tile layer itself, so a blocked CDN can no longer leave
+   broken pin glyphs on an otherwise working map. */
+function pinDataUri(svg: string): string {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+const MARKER_ICON = pinDataUri(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+    <path d="M12.5 0C5.6 0 0 5.6 0 12.5 0 22 12.5 41 12.5 41S25 22 25 12.5C25 5.6 19.4 0 12.5 0z"
+      fill="#1d63b8" stroke="#ffffff" stroke-width="1.6"/>
+    <circle cx="12.5" cy="12.5" r="4.6" fill="#ffffff"/>
+  </svg>`,
+);
+
+const MARKER_ICON_RETINA = pinDataUri(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="50" height="82" viewBox="0 0 25 41">
+    <path d="M12.5 0C5.6 0 0 5.6 0 12.5 0 22 12.5 41 12.5 41S25 22 25 12.5C25 5.6 19.4 0 12.5 0z"
+      fill="#1d63b8" stroke="#ffffff" stroke-width="1.6"/>
+    <circle cx="12.5" cy="12.5" r="4.6" fill="#ffffff"/>
+  </svg>`,
+);
+
+const MARKER_SHADOW = pinDataUri(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="41" height="41" viewBox="0 0 41 41">
+    <ellipse cx="12.5" cy="38" rx="11" ry="3" fill="rgba(0,0,0,0.28)"/>
+  </svg>`,
+);
+
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconRetinaUrl: MARKER_ICON_RETINA,
+  iconUrl: MARKER_ICON,
+  shadowUrl: MARKER_SHADOW,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowAnchor: [12, 41],
+  shadowSize: [41, 41],
 });
 
-/* Free, keyless raster basemaps. No token, no account, and no watermark:
-   - Light: the canonical OSM standard layer, sharded across a/b/c hosts so one
-     tile server is never a single point of failure.
-   - Dark: CARTO's dark_all raster basemap, which is a registered third-party
-     service on the same OpenStreetMap data and also requires no key. Used for
-     the command center because light raster tiles glare against the navy panel.
-   Both are backed by a visible container background and a tileerror surface, so
-   a tile outage degrades to an explicit message rather than a black rectangle. */
-const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+/* Free, keyless public basemap. OSM's own tile service is the only source used
+   anywhere in this app.
+   - Light: the canonical OSM standard layer.
+   - Dark: the same OSM layer, dimmed client-side with a CSS filter. A raster
+     basemap cannot be recoloured server-side, and every dark basemap that
+     offers one (Mapbox, Stadia, Jawg) is a keyed service that renders a black
+     "API KEY REQUIRED" tile without a token. Filtering OSM locally keeps the
+     navy command-centre treatment with zero credentials.
+   The container also carries a themed background and a tileerror surface, so a
+   tile outage degrades to an explicit message rather than a black rectangle. */
+const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
-const DARK_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-const DARK_TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-
 const DHAKA_CENTER: [number, number] = [23.8103, 90.4125];
 
-/** Tier colours shared with the dashboard legend. */
+/** Tier colours for the dark-variant cluster discs, matching the map legend. */
 const TIER_FILL: Record<"critical" | "elevated" | "normal", string> = {
   critical: "#fb7185",
   elevated: "#fcd34d",
@@ -184,8 +217,11 @@ export default function CivicMap({
       >
         <TileLayer
           key={tileEpoch}
-          url={dark ? DARK_TILE_URL : TILE_URL}
-          attribution={dark ? DARK_TILE_ATTRIBUTION : TILE_ATTRIBUTION}
+          url={TILE_URL}
+          attribution={TILE_ATTRIBUTION}
+          /* Applied to the tile pane, so the map is themed without swapping
+             to a keyed dark basemap. */
+          className={dark ? "civic-tiles-dark" : undefined}
           eventHandlers={{
             /* A handful of 404s is normal at the edges of a panned map. Sustained
                failure means the basemap is genuinely unreachable, so the map says
