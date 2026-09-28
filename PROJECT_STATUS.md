@@ -6,10 +6,10 @@
 | Field | Value |
 |---|---|
 | Platform | CivicLens · AI Civic Intelligence Platform |
-| App root | `civic-ai/` (Next.js app; git repo root is the parent directory) |
+| App root | `civic-ai/` (Next.js app and Git repo root) |
 | Audit date | 2026-09-28 |
 | Build status | `tsc --noEmit` clean · `eslint src/` clean · `npm run build` passes |
-| Head commit | `d4e7857 fix issue` (working tree clean) |
+| Head commit | `c2683fb fixed map issue` (working tree clean) |
 | Files audited | `src/app/page.tsx` (2042 L), `src/app/api/analyze/route.ts` (528 L), `src/app/civic-shared.ts` (398 L), `src/components/CivicMap.tsx` (100 L), `src/app/layout.tsx`, `package.json`, `next.config.ts`, `.gitignore`, `README.md` |
 
 > **Update — critical blocker RESOLVED.** The audit found the AI triage path non-functional (all three configured models returned HTTP 404, so every request fell through to the heuristic). This has since been **fixed and verified end-to-end**: the cascade is now `gemini-3.8-flash` → `gemini-3.1-flash-lite` → `gemini-3.5-flash` with `thinkingConfig` applied per model, malformed model output now cascades instead of silently misclassifying, and responses carry model-aware `confidence` plus a new `active_model` field. Live requests return `is_fallback: false` with a real model. See §5.1.
